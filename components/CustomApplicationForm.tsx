@@ -39,6 +39,9 @@ export function CustomApplicationForm({ onSubmitSuccess }: CustomApplicationForm
     const [formData, setFormData] = useState<FormData | null>(null);
     const [loading, setLoading] = useState(true);
     const [submitting, setSubmitting] = useState(false);
+    const [autoSubmitting, setAutoSubmitting] = useState(false);
+    const [autoSubmitSuccess, setAutoSubmitSuccess] = useState(false);
+    const [isExiting, setIsExiting] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [success, setSuccess] = useState(false);
     const [responses, setResponses] = useState<FormResponses>({});
@@ -110,17 +113,6 @@ export function CustomApplicationForm({ onSubmitSuccess }: CustomApplicationForm
     };
 
     const handleSubmit = async () => {
-        // If not signed in, trigger OAuth
-        if (!session) {
-            // Store responses in sessionStorage before redirecting to OAuth
-            sessionStorage.setItem("pendingFormResponses", JSON.stringify(responses));
-            signIn("google");
-            return;
-        }
-
-        setSubmitting(true);
-        setError(null);
-
         // Transform responses to use Entry IDs instead of React Keys
         const submissionPayload: Record<string, unknown> = {};
 
@@ -135,20 +127,28 @@ export function CustomApplicationForm({ onSubmitSuccess }: CustomApplicationForm
                 }
 
                 // Handle Grid Questions
-                // For grids, the answer is an object { [rowUniqueId]: val }
-                // We need to map rowUniqueId -> rowEntryId
                 if (q.rows && typeof answer === 'object' && answer !== null) {
                     const gridAnswer = answer as Record<string, any>;
                     q.rows.forEach((row) => {
                         const rowVal = gridAnswer[row.id];
                         if (rowVal !== undefined && row.entryId) {
-                            // Add to payload using the ROW'S entry ID
                             submissionPayload[row.entryId] = rowVal;
                         }
                     });
                 }
             });
         }
+
+        // If not signed in, trigger OAuth (store the TRANSFORMED payload)
+        if (!session) {
+            sessionStorage.setItem("pendingFormPayload", JSON.stringify(submissionPayload));
+            sessionStorage.setItem("pendingFormType", formType);
+            signIn("google");
+            return;
+        }
+
+        setSubmitting(true);
+        setError(null);
 
         // Debug
         console.log("Submitting Payload Maps:", submissionPayload);
@@ -178,13 +178,70 @@ export function CustomApplicationForm({ onSubmitSuccess }: CustomApplicationForm
         }
     };
 
-    // Restore responses after OAuth redirect
+    // Restore responses after OAuth redirect and AUTO-SUBMIT
     useEffect(() => {
         if (session && status === "authenticated") {
-            const pending = sessionStorage.getItem("pendingFormResponses");
-            if (pending) {
-                setResponses(JSON.parse(pending));
-                sessionStorage.removeItem("pendingFormResponses");
+            const pendingPayload = sessionStorage.getItem("pendingFormPayload");
+            const pendingType = sessionStorage.getItem("pendingFormType");
+
+            if (pendingPayload) {
+                const payload = JSON.parse(pendingPayload);
+
+                // Clear storage immediately to prevent re-triggering
+                sessionStorage.removeItem("pendingFormPayload");
+                sessionStorage.removeItem("pendingFormType");
+
+                // Set form type for display
+                if (pendingType === "competitor" || pendingType === "attendee") {
+                    setFormType(pendingType);
+                }
+
+                // Auto-submit immediately
+                setAutoSubmitting(true);
+
+                (async () => {
+                    try {
+                        setSubmitting(true);
+                        setError(null);
+
+                        // Payload is already transformed with Entry IDs
+                        const res = await fetch("/api/forms/submit", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({
+                                responses: payload,
+                                type: pendingType || "competitor"
+                            }),
+                        });
+
+                        if (!res.ok) {
+                            const data = await res.json();
+                            throw new Error(data.error || "Failed to submit");
+                        }
+
+                        setAutoSubmitSuccess(true);
+
+                        // Wait for checkmark animation (2000ms), then fade out
+                        setTimeout(() => {
+                            setIsExiting(true);
+
+                            // Wait for fade out (300ms) then switch UI
+                            setTimeout(() => {
+                                setSuccess(true);
+                                onSubmitSuccess?.();
+                                setAutoSubmitting(false);
+                                setAutoSubmitSuccess(false);
+                                setIsExiting(false);
+                            }, 300);
+                        }, 2000);
+                    } catch (err) {
+                        console.error("Auto-submit error:", err);
+                        setError(err instanceof Error ? err.message : "Failed to submit form");
+                        setAutoSubmitting(false);
+                    } finally {
+                        setSubmitting(false);
+                    }
+                })();
             }
         }
     }, [session, status]);
@@ -527,6 +584,101 @@ export function CustomApplicationForm({ onSubmitSuccess }: CustomApplicationForm
                 return <p className="text-zinc-500">Unsupported question type: {question.type}</p>;
         }
     };
+
+    // Auto-submitting modal overlay
+    if (autoSubmitting) {
+        return (
+            <div className={`fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center transition-opacity duration-300 ${isExiting ? 'opacity-0' : 'opacity-100'}`}>
+                <style jsx>{`
+                    @keyframes checkmark-draw {
+                        0% {
+                            stroke-dashoffset: 24;
+                        }
+                        100% {
+                            stroke-dashoffset: 0;
+                        }
+                    }
+                    @keyframes scale-in {
+                        0% {
+                            transform: scale(0.5);
+                            opacity: 0;
+                        }
+                        50% {
+                            transform: scale(1.1);
+                        }
+                        100% {
+                            transform: scale(1);
+                            opacity: 1;
+                        }
+                    }
+                    @keyframes fade-out-spinner {
+                        0% {
+                            opacity: 1;
+                            transform: scale(1);
+                        }
+                        100% {
+                            opacity: 0;
+                            transform: scale(0.8);
+                        }
+                    }
+                    @keyframes text-fade-in {
+                        0% {
+                            opacity: 0;
+                            transform: translateY(10px);
+                        }
+                        100% {
+                            opacity: 1;
+                            transform: translateY(0);
+                        }
+                    }
+                    .checkmark-icon {
+                        animation: scale-in 0.4s ease-out forwards;
+                    }
+                    .checkmark-path {
+                        stroke-dasharray: 24;
+                        stroke-dashoffset: 24;
+                        animation: checkmark-draw 0.4s ease-out 0.2s forwards;
+                    }
+                    .success-text {
+                        animation: text-fade-in 0.3s ease-out 0.3s forwards;
+                        opacity: 0;
+                    }
+                    .spinner-exit {
+                        animation: fade-out-spinner 0.2s ease-out forwards;
+                    }
+                `}</style>
+                <div className="bg-white dark:bg-zinc-900 rounded-2xl p-8 max-w-sm mx-4 text-center shadow-2xl">
+                    {autoSubmitSuccess ? (
+                        <>
+                            <div className="checkmark-icon mx-auto w-16 h-16 bg-green-500/10 rounded-full flex items-center justify-center mb-4">
+                                <svg className="w-8 h-8 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                                    <path className="checkmark-path" strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                                </svg>
+                            </div>
+                            <h3 className="success-text text-xl font-bold text-zinc-900 dark:text-white">
+                                Application Submitted!
+                            </h3>
+                            <p className="success-text mt-2 text-zinc-600 dark:text-zinc-400" style={{ animationDelay: '0.4s' }}>
+                                Thank you for registering!
+                            </p>
+                        </>
+                    ) : (
+                        <>
+                            <div className="mx-auto w-16 h-16 bg-[#007b8a]/10 rounded-full flex items-center justify-center mb-4">
+                                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#007b8a]"></div>
+                            </div>
+                            <h3 className="text-xl font-bold text-zinc-900 dark:text-white">
+                                Submitting Your Application
+                            </h3>
+                            <p className="mt-2 text-zinc-600 dark:text-zinc-400">
+                                Welcome back! We're automatically submitting your form...
+                            </p>
+                        </>
+                    )}
+                </div>
+            </div>
+        );
+    }
 
     // Loading state
     if (loading) {
