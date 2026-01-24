@@ -46,6 +46,20 @@ export function CustomApplicationForm({ onSubmitSuccess }: CustomApplicationForm
     const [success, setSuccess] = useState(false);
     const [responses, setResponses] = useState<FormResponses>({});
     const [formType, setFormType] = useState<"competitor" | "attendee">("competitor");
+    const [selectedMajor, setSelectedMajor] = useState<string | null>(null);
+
+    // Skip logic configuration: question ranges for each major (1-indexed)
+    // Each major shows questions from 'start' up to but not including 'end'
+    // Questions before the major question (e.g., 1-4) are always shown
+    const SKIP_LOGIC: Record<string, { start: number; end: number | null }> = {
+        "Medicine": { start: 7, end: 13 },      // Shows Q7-12
+        "Engineering": { start: 13, end: 20 },  // Shows Q13-19
+        "Design": { start: 20, end: null },     // Shows Q20 onwards
+    };
+
+    // The question index (0-indexed) that triggers the skip logic
+    // This is typically "What major are you in?" - we'll detect it by label
+    const MAJOR_QUESTION_KEYWORDS = ["major", "what major"];
 
     // 1. Initial Fetch
     useEffect(() => {
@@ -76,6 +90,40 @@ export function CustomApplicationForm({ onSubmitSuccess }: CustomApplicationForm
 
     const updateResponse = (questionId: string, value: unknown) => {
         setResponses((prev) => ({ ...prev, [questionId]: value }));
+
+        // Check if this is the major question and update selectedMajor
+        if (formData) {
+            const question = formData.questions.find(q => q.id === questionId);
+            if (question && MAJOR_QUESTION_KEYWORDS.some(kw => question.label.toLowerCase().includes(kw))) {
+                const newMajor = value as string;
+
+                // If major is changing, clear responses for questions that will become hidden
+                if (newMajor !== selectedMajor) {
+                    setSelectedMajor(newMajor);
+
+                    // Clear responses for all questions after the major question
+                    // (these are the section-specific questions that may have stale data)
+                    const majorQuestionIndex = formData.questions.findIndex(q =>
+                        MAJOR_QUESTION_KEYWORDS.some(kw => q.label.toLowerCase().includes(kw))
+                    );
+
+                    if (majorQuestionIndex !== -1) {
+                        setResponses(prev => {
+                            const cleaned: FormResponses = {};
+                            // Only keep responses for questions up to and including the major question
+                            formData.questions.forEach((q, idx) => {
+                                if (idx <= majorQuestionIndex && prev[q.id] !== undefined) {
+                                    cleaned[q.id] = prev[q.id];
+                                }
+                            });
+                            // Add the new major selection
+                            cleaned[questionId] = value;
+                            return cleaned;
+                        });
+                    }
+                }
+            }
+        }
     };
 
     const handleCheckboxChange = (questionId: string, option: string, checked: boolean) => {
@@ -116,14 +164,29 @@ export function CustomApplicationForm({ onSubmitSuccess }: CustomApplicationForm
         // Transform responses to use Entry IDs instead of React Keys
         const submissionPayload: Record<string, unknown> = {};
 
+        // Debug: Log the skip logic state
+        console.log("=== SUBMISSION DEBUG ===");
+        console.log("Selected Major:", selectedMajor);
+        console.log("Form Type:", formType);
+
         if (formData) {
-            formData.questions.forEach((q) => {
+            console.log("Total questions in form:", formData.questions.length);
+
+            formData.questions.forEach((q, index) => {
+                const visible = isQuestionVisible(index);
                 const answer = responses[q.id];
+
+                console.log(`Q${index + 1}: "${q.label.substring(0, 50)}..." | Visible: ${visible} | Has Answer: ${answer !== undefined && answer !== ""} | EntryID: ${q.entryId}`);
+
+                // Only include responses for VISIBLE questions
+                if (!visible) return;
+
                 if (answer === undefined || answer === "") return;
 
                 // Handle standard questions
                 if (q.entryId) {
                     submissionPayload[q.entryId] = answer;
+                    console.log(`  -> Submitting: entry.${q.entryId} = "${String(answer).substring(0, 30)}..."`);
                 }
 
                 // Handle Grid Questions
@@ -133,10 +196,14 @@ export function CustomApplicationForm({ onSubmitSuccess }: CustomApplicationForm
                         const rowVal = gridAnswer[row.id];
                         if (rowVal !== undefined && row.entryId) {
                             submissionPayload[row.entryId] = rowVal;
+                            console.log(`  -> Grid Row: entry.${row.entryId} = "${rowVal}"`);
                         }
                     });
                 }
             });
+
+            console.log("=== FINAL PAYLOAD ===");
+            console.log(JSON.stringify(submissionPayload, null, 2));
         }
 
         // If not signed in, trigger OAuth (store the TRANSFORMED payload)
@@ -245,6 +312,42 @@ export function CustomApplicationForm({ onSubmitSuccess }: CustomApplicationForm
             }
         }
     }, [session, status]);
+
+    // Helper to determine if a question should be visible based on skip logic
+    const isQuestionVisible = (index: number): boolean => {
+        if (!formData) return true;
+
+        // Find the major question index
+        const majorQuestionIndex = formData.questions.findIndex(q =>
+            MAJOR_QUESTION_KEYWORDS.some(kw => q.label.toLowerCase().includes(kw))
+        );
+
+        // If no major question found, show all questions
+        if (majorQuestionIndex === -1) return true;
+
+        // If we haven't selected a major yet, only show questions up to and including the major question
+        if (!selectedMajor) {
+            return index <= majorQuestionIndex;
+        }
+
+        // Get the range for the selected major
+        const range = SKIP_LOGIC[selectedMajor];
+
+        // If no skip logic defined for this major, show all questions
+        if (!range) return true;
+
+        // Questions up to and including the major question are always visible
+        if (index <= majorQuestionIndex) return true;
+
+        // Convert to 1-indexed for comparison with skip logic config
+        const questionNumber = index + 1;
+
+        // Check if question falls within the range for this major
+        const afterStart = questionNumber >= range.start;
+        const beforeEnd = range.end === null || questionNumber < range.end;
+
+        return afterStart && beforeEnd;
+    };
 
     const renderQuestion = (question: FormQuestion) => {
         switch (question.type) {
@@ -774,24 +877,47 @@ export function CustomApplicationForm({ onSubmitSuccess }: CustomApplicationForm
             </div>
 
             {/* Questions */}
-            <div className="p-6 sm:p-8 space-y-0 divide-y divide-zinc-200 dark:divide-zinc-800">
-                {formData.questions.map((question, index) => (
-                    <div
-                        key={`${question.id}-${index}`}
-                        className="py-8 first:pt-0 last:pb-0"
-                    >
-                        <label className="block mb-4">
-                            <span className="text-xs font-medium text-[#007b8a] dark:text-[#007b8a] uppercase tracking-wide">
-                                Question {index + 1}
-                            </span>
-                            <h4 className="mt-1 text-lg font-medium text-zinc-900 dark:text-white">
-                                {question.label}
-                                {question.required && <span className="text-red-500 ml-1">*</span>}
-                            </h4>
-                        </label>
-                        {renderQuestion(question)}
-                    </div>
-                ))}
+            <div className="p-6 sm:p-8">
+                {(() => {
+                    let visibleCount = 0;
+                    return formData.questions.map((question, index) => {
+                        const visible = isQuestionVisible(index);
+
+                        // Skip hidden questions entirely to avoid spacing issues
+                        if (!visible) return null;
+
+                        // Increment the visible question counter
+                        visibleCount++;
+                        const questionNumber = visibleCount;
+
+                        // Find if there's a previous visible question to show border
+                        let hasPrevVisible = false;
+                        for (let i = index - 1; i >= 0; i--) {
+                            if (isQuestionVisible(i)) {
+                                hasPrevVisible = true;
+                                break;
+                            }
+                        }
+
+                        return (
+                            <div
+                                key={`${question.id}-${index}`}
+                                className={`py-8 ${hasPrevVisible ? 'border-t border-zinc-200 dark:border-zinc-800' : ''}`}
+                            >
+                                <label className="block mb-4">
+                                    <span className="text-xs font-medium text-[#007b8a] dark:text-[#007b8a] uppercase tracking-wide">
+                                        Question {questionNumber}
+                                    </span>
+                                    <h4 className="mt-1 text-lg font-medium text-zinc-900 dark:text-white">
+                                        {question.label}
+                                        {question.required && <span className="text-red-500 ml-1">*</span>}
+                                    </h4>
+                                </label>
+                                {renderQuestion(question)}
+                            </div>
+                        );
+                    });
+                })()}
             </div>
 
             {/* Submit Button */}
