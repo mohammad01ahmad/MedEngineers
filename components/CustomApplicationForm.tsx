@@ -47,6 +47,8 @@ export function CustomApplicationForm({ onSubmitSuccess }: CustomApplicationForm
     const [responses, setResponses] = useState<FormResponses>({});
     const [formType, setFormType] = useState<"competitor" | "attendee">("competitor");
     const [selectedMajor, setSelectedMajor] = useState<string | null>(null);
+    const [validationErrors, setValidationErrors] = useState<Record<string, string | null>>({});
+    const [isFormValid, setIsFormValid] = useState(false);
 
     // Skip logic configuration: question ranges for each major (1-indexed)
     // Each major shows questions from 'start' up to but not including 'end'
@@ -60,6 +62,84 @@ export function CustomApplicationForm({ onSubmitSuccess }: CustomApplicationForm
     // The question index (0-indexed) that triggers the skip logic
     // This is typically "What major are you in?" - we'll detect it by label
     const MAJOR_QUESTION_KEYWORDS = ["major", "what major"];
+
+    const isValidEmail = (email: string) => {
+        return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+    };
+
+    const isValidNumber = (value: string | number) => {
+        if (value === "") return false;
+        const num = Number(value);
+        return !isNaN(num);
+    };
+
+    const validateQuestion = (question: FormQuestion, value: unknown, currentFormType: string): string | null => {
+        // For competitor form: ALL visible questions are treated as required
+        // For attendee form: respect the Google Form's required settings
+        const isRequired = currentFormType === "competitor" ? true : question.required;
+
+        // 1. Required check
+        if (isRequired) {
+            if (value === undefined || value === "" || value === null) return "This field is required";
+            if (Array.isArray(value) && value.length === 0) return "This field is required";
+            if (typeof value === 'object' && Object.keys(value as object).length === 0) return "This field is required";
+        }
+
+        // Return early if empty and not required (optional fields)
+        if (value === undefined || value === "" || value === null) return null;
+
+        // Only apply partial text validation (Email/Number heuristics) to text inputs
+        // This prevents false positives on Select, Radio, Checkbox where values might contain text like "Year 1"
+        if (question.type !== "short_answer" && question.type !== "paragraph") return null;
+
+        const valString = String(value).trim();
+        const labelLower = question.label.toLowerCase();
+
+        // 2. Emirates ID Validation (numbers and dashes only)
+        if (labelLower.includes("emirates id")) {
+            // Emirates ID format: 784-XXXX-XXXXXXX-X (numbers and dashes)
+            const emiratesIdPattern = /^[0-9-]+$/;
+            if (!emiratesIdPattern.test(valString)) {
+                return "Emirates ID should only contain numbers and dashes";
+            }
+        }
+
+        // 3. Phone Number Validation (allows +, -, spaces, and numbers)
+        if (
+            labelLower.includes("phone") ||
+            labelLower.includes("whatsapp") ||
+            labelLower.includes("contact number")
+        ) {
+            // Phone format: allows +971-XX-XXX-XXXX or similar
+            const phonePattern = /^[0-9+\-\s()]+$/;
+            if (!phonePattern.test(valString)) {
+                return "Phone number should only contain numbers, +, -, and spaces";
+            }
+        }
+
+        // 4. Email Validation
+        if (labelLower.includes("email")) {
+            if (!isValidEmail(valString)) return "Please enter a valid email address";
+        }
+
+        // 5. Generic Number Validation (for other numeric fields)
+        if (
+            (question.type === "short_answer" && labelLower.includes("number") && !labelLower.includes("contact number") && !labelLower.includes("phone")) ||
+            labelLower.includes("gpa") ||
+            (labelLower.includes("year") && !labelLower.includes("major and year"))
+        ) {
+            if (!isValidNumber(valString)) return "Please enter a valid number";
+        }
+
+        // 6. Min/Max Logic (for number inputs)
+        if (isValidNumber(valString) && (question.min !== undefined || question.max !== undefined)) {
+            const num = Number(valString);
+            if (question.min !== undefined && num < question.min) return `Minimum value is ${question.min}`;
+            if (question.max !== undefined && num > question.max) return `Maximum value is ${question.max}`;
+        }
+
+        return null;
+    };
 
     // 1. Initial Fetch
     useEffect(() => {
@@ -90,6 +170,15 @@ export function CustomApplicationForm({ onSubmitSuccess }: CustomApplicationForm
 
     const updateResponse = (questionId: string, value: unknown) => {
         setResponses((prev) => ({ ...prev, [questionId]: value }));
+
+        // Real-time validation
+        if (formData) {
+            const question = formData.questions.find(q => q.id === questionId);
+            if (question) {
+                const error = validateQuestion(question, value, formType);
+                setValidationErrors(prev => ({ ...prev, [questionId]: error }));
+            }
+        }
 
         // Check if this is the major question and update selectedMajor
         if (formData) {
@@ -348,6 +437,43 @@ export function CustomApplicationForm({ onSubmitSuccess }: CustomApplicationForm
 
         return afterStart && beforeEnd;
     };
+
+    // Check overall form validity
+    useEffect(() => {
+        if (!formData) return;
+
+        let valid = true;
+
+        // Debug: Track why form is invalid
+        let firstInvalidReason = "";
+
+        formData.questions.forEach((q, index) => {
+            const visible = isQuestionVisible(index);
+
+            // CRITICAL: We only validate VISIBLE questions. 
+            // This ensures that if a user selects "Medicine", the hidden "Engineering" questions 
+            // (which are required but not visible) do NOT block submission.
+            if (visible) {
+                const val = responses[q.id];
+                const error = validateQuestion(q, val, formType);
+                if (error) {
+                    valid = false;
+                    if (!firstInvalidReason) firstInvalidReason = `Q${index + 1} (${q.label.substring(0, 15)}...): ${error}`;
+                }
+            }
+        });
+
+        // Debug log: uncomment this to see why the form is invalid
+        console.log(`[Validation] FormType: ${formType}, Major: ${selectedMajor}, Valid: ${valid}, Reason: ${firstInvalidReason || "None"}`);
+
+        setIsFormValid(valid);
+    }, [responses, selectedMajor, formData, formType]);
+
+    // Reset validation state when switching form types to prevent stale validation
+    useEffect(() => {
+        setIsFormValid(false);
+        setValidationErrors({});
+    }, [formType]);
 
     const renderQuestion = (question: FormQuestion) => {
         switch (question.type) {
@@ -914,6 +1040,11 @@ export function CustomApplicationForm({ onSubmitSuccess }: CustomApplicationForm
                                     </h4>
                                 </label>
                                 {renderQuestion(question)}
+                                {validationErrors[question.id] && (
+                                    <p className="mt-2 text-sm text-red-500 font-medium animate-pulse">
+                                        {validationErrors[question.id]}
+                                    </p>
+                                )}
                             </div>
                         );
                     });
@@ -924,8 +1055,12 @@ export function CustomApplicationForm({ onSubmitSuccess }: CustomApplicationForm
             <div className="p-6 sm:p-8 bg-zinc-50 dark:bg-zinc-800/50 border-t border-zinc-200 dark:border-zinc-800">
                 <button
                     onClick={handleSubmit}
-                    disabled={submitting}
-                    className="group relative w-full py-4 px-8 bg-[#007b8a] text-white font-bold text-lg rounded-full overflow-hidden transition-all hover:scale-[1.02] active:scale-[0.98] shadow-[0_0_25px_rgba(0,123,138,0.3)] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100 flex items-center justify-center gap-3 uppercase tracking-wider"
+                    disabled={submitting || !isFormValid}
+                    className={`group relative w-full py-4 px-8 font-bold text-lg rounded-full overflow-hidden transition-all flex items-center justify-center gap-3 uppercase tracking-wider
+                        ${submitting || !isFormValid
+                            ? "bg-zinc-300 dark:bg-zinc-700 text-zinc-500 dark:text-zinc-400 cursor-not-allowed"
+                            : "bg-[#007b8a] text-white hover:scale-[1.02] active:scale-[0.98] shadow-[0_0_25px_rgba(0,123,138,0.3)]"
+                        }`}
                 >
                     <div className="absolute inset-0 bg-white/10 translate-y-full group-hover:translate-y-0 transition-transform duration-300" />
                     <span className="relative z-10 flex items-center gap-3">
@@ -954,6 +1089,11 @@ export function CustomApplicationForm({ onSubmitSuccess }: CustomApplicationForm
                         )}
                     </span>
                 </button>
+                {(!isFormValid && !submitting) && (
+                    <p className="mt-3 text-center text-sm font-medium text-red-500 dark:text-red-400 animate-pulse">
+                        Please complete all visible required fields to submit.
+                    </p>
+                )}
                 <p className="mt-3 text-center text-xs text-zinc-500 dark:text-zinc-400">
                     {session
                         ? "Your application will be submitted to Google Forms"
