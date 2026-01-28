@@ -31,8 +31,16 @@ export async function POST(req: NextRequest) {
                 const decodedToken = await adminAuth.verifyIdToken(idToken);
                 const uid = decodedToken.uid;
 
+                // check if user already exists in attendees collection
+                const userDoc = await adminDb.collection("attendees").doc(uid).get();
+                if (userDoc.exists) {
+                    return NextResponse.json(
+                        { error: "User already exists" },
+                        { status: 409 }
+                    );
+                }
 
-                // Store the form submission to Firebase
+                // Store the form submission to Firebase (if user doesn't exist)
                 await adminDb.collection("attendees").doc(uid).set({
                     fullName: responses["1706880442"] || "",
                     email: responses["464604082"] || session.user.email,
