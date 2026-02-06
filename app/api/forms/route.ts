@@ -1,12 +1,12 @@
 import { google } from "googleapis";
 import { NextResponse } from "next/server";
 
-// Form structure types
 interface FormQuestion {
     id: string;
     entryId?: string; // Actual Google Form Entry ID
     type: string;
     label: string;
+    description?: string; // Question description/help text
     required: boolean;
     options?: string[];
     min?: number;
@@ -73,10 +73,22 @@ export async function GET(req: Request) {
 
         if (form.items) {
             for (const item of form.items) {
-                // Skip non-question items (like page breaks, headers)
-                if (!item.questionItem && !item.questionGroupItem) continue;
-
                 const title = item.title || "";
+
+                // Handle section headers (non-question items)
+                if (!item.questionItem && !item.questionGroupItem) {
+                    // This is a section header - include it with a special type
+                    if (title) {
+                        formData.questions.push({
+                            id: `header_${item.itemId || Math.random().toString(36).slice(2)}`,
+                            type: "section_header",
+                            label: title,
+                            description: item.description || "",
+                            required: false,
+                        });
+                    }
+                    continue;
+                }
 
                 // Try to find the Entry ID Queue
                 // We use a reference so we can shift items off it!
@@ -135,6 +147,7 @@ export async function GET(req: Request) {
                         entryId: scrapedEntryId, // Only use real Entry IDs for submission
                         type: "short_answer",
                         label: title,
+                        description: item.description || "", // Extract description from item
                         required: question.required || false,
                     };
 
@@ -151,7 +164,13 @@ export async function GET(req: Request) {
                         } else if (choiceQ.type === "DROP_DOWN") {
                             baseQuestion.type = "dropdown";
                         }
-                        baseQuestion.options = choiceQ.options?.map((o) => o.value || "") || [];
+                        baseQuestion.options = choiceQ.options?.map((o) => {
+                            // Google Forms returns isOther:true for "Other" option with empty value
+                            if (o.isOther || !o.value) {
+                                return "__OTHER__";
+                            }
+                            return o.value;
+                        }).filter(Boolean) || [];
                     } else if (question.scaleQuestion) {
                         baseQuestion.type = "linear_scale";
                         baseQuestion.min = question.scaleQuestion.low || 1;

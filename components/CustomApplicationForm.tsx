@@ -1,7 +1,6 @@
-"use client";
-
 import { useState, useEffect } from "react";
 import { useSession, signIn, signOut } from "next-auth/react";
+import ReactMarkdown from "react-markdown";
 
 
 // hello world (testing smth)
@@ -11,6 +10,7 @@ interface FormQuestion {
     entryId?: string; // Actual Google Form Entry ID
     type: string;
     label: string;
+    description?: string; // Question description/help text
     required: boolean;
     options?: string[];
     min?: number;
@@ -54,14 +54,13 @@ export function CustomApplicationForm({ onSubmitSuccess }: CustomApplicationForm
     // Each major shows questions from 'start' up to but not including 'end'
     // Questions before the major question (e.g., 1-4) are always shown
     const SKIP_LOGIC: Record<string, { start: number; end: number | null }> = {
-        "Medicine": { start: 7, end: 13 },      // Shows Q7-12
-        "Engineering": { start: 13, end: 20 },  // Shows Q13-19
-        "Design": { start: 20, end: null },     // Shows Q20 onwards
+        "Engineering": { start: 7, end: 23 },   // Items 7-22 (Engineering header through end of Engineering questions)
+        "Medicine": { start: 23, end: null },   // Items 23-end (Medicine header through end)
     };
 
     // The question index (0-indexed) that triggers the skip logic
     // This is typically "What major are you in?" - we'll detect it by label
-    const MAJOR_QUESTION_KEYWORDS = ["major", "what major"];
+    const MAJOR_QUESTION_KEYWORDS = ["what major are you in", "what is your major and year of study"];
 
     const isValidEmail = (email: string) => {
         return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
@@ -74,9 +73,17 @@ export function CustomApplicationForm({ onSubmitSuccess }: CustomApplicationForm
     };
 
     const validateQuestion = (question: FormQuestion, value: unknown, currentFormType: string): string | null => {
-        // For competitor form: ALL visible questions are treated as required
+        // For competitor form: ALL visible questions are generally required, BUT we respect explicit false.
         // For attendee form: respect the Google Form's required settings
-        const isRequired = currentFormType === "competitor" ? true : question.required;
+
+        let isRequired = question.required;
+
+        if (currentFormType === "competitor") {
+            // Default to true for competitors, UNLESS explicitly set to false (e.g. Toolkit questions)
+            if (question.required !== false) {
+                isRequired = true;
+            }
+        }
 
         // 1. Required check
         if (isRequired) {
@@ -97,11 +104,8 @@ export function CustomApplicationForm({ onSubmitSuccess }: CustomApplicationForm
 
         // 2. Emirates ID Validation (numbers and dashes only)
         if (labelLower.includes("emirates id")) {
-            // Emirates ID format: 784-XXXX-XXXXXXX-X (numbers and dashes)
-            const emiratesIdPattern = /^[0-9-]+$/;
-            if (!emiratesIdPattern.test(valString)) {
-                return "Emirates ID should only contain numbers and dashes";
-            }
+            // Enforcement removed as per request
+            return null;
         }
 
         // 3. Phone Number Validation (allows +, -, spaces, and numbers)
@@ -149,6 +153,26 @@ export function CustomApplicationForm({ onSubmitSuccess }: CustomApplicationForm
                 const res = await fetch(`/api/forms?type=${formType}`);
                 if (!res.ok) throw new Error("Failed to fetch form");
                 const data = await res.json();
+
+                // DATA TRANSFORMATION:
+                // Make "Your Technical Toolkit" questions optional
+                let inToolkitSection = false;
+                data.questions = data.questions.map((q: FormQuestion) => {
+                    if (q.type === 'section_header' && q.label?.includes("Your Technical Toolkit")) {
+                        inToolkitSection = true;
+                    } else if (inToolkitSection && q.type === 'section_header') {
+                        // End of toolkit section (next header found)
+                        inToolkitSection = false;
+                    }
+
+                    if (inToolkitSection && q.type !== 'section_header') {
+                        // This is a toolkit question -> Make OPTIONAL
+                        return { ...q, required: false };
+                    }
+
+                    return q;
+                });
+
                 setFormData(data);
                 setError(null);
             } catch (err) {
@@ -537,27 +561,63 @@ export function CustomApplicationForm({ onSubmitSuccess }: CustomApplicationForm
             case "radio":
                 return (
                     <div className="space-y-3">
-                        {question.options?.map((option) => (
-                            <label
-                                key={option}
-                                className="flex items-center gap-3 p-3 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800/30 hover:bg-zinc-50 dark:hover:bg-zinc-800/50 cursor-pointer transition-all group"
-                            >
-                                <div className="relative flex items-center justify-center w-5 h-5 rounded-full border-2 border-zinc-300 dark:border-zinc-600 group-hover:border-[#007b8a] transition-colors">
-                                    <input
-                                        type="radio"
-                                        name={question.id}
-                                        value={option}
-                                        checked={responses[question.id] === option}
-                                        onChange={() => updateResponse(question.id, option)}
-                                        className="sr-only"
-                                    />
-                                    {responses[question.id] === option && (
-                                        <div className="w-2.5 h-2.5 rounded-full bg-[#007b8a]" />
+                        {question.options?.map((option) => {
+                            const isOtherOption = option === "__OTHER__";
+                            const displayLabel = isOtherOption ? "Other" : option;
+
+                            // For "Other", check if response is NOT one of the predefined options
+                            const isOtherSelected = isOtherOption &&
+                                responses[question.id] !== undefined &&
+                                responses[question.id] !== "" &&
+                                !question.options?.filter(o => o !== "__OTHER__").includes(responses[question.id] as string);
+
+                            const isSelected = isOtherOption ? isOtherSelected : responses[question.id] === option;
+
+                            return (
+                                <label
+                                    key={option}
+                                    className="flex items-center gap-3 p-3 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800/30 hover:bg-zinc-50 dark:hover:bg-zinc-800/50 cursor-pointer transition-all group"
+                                >
+                                    <div className="relative flex items-center justify-center w-5 h-5 rounded-full border-2 border-zinc-300 dark:border-zinc-600 group-hover:border-[#007b8a] transition-colors">
+                                        <input
+                                            type="radio"
+                                            name={question.id}
+                                            value={option}
+                                            checked={isSelected}
+                                            onChange={() => {
+                                                if (isOtherOption) {
+                                                    // When clicking Other, set to empty string (user will type)
+                                                    updateResponse(question.id, "");
+                                                } else {
+                                                    updateResponse(question.id, option);
+                                                }
+                                            }}
+                                            className="sr-only"
+                                        />
+                                        {isSelected && (
+                                            <div className="w-2.5 h-2.5 rounded-full bg-[#007b8a]" />
+                                        )}
+                                    </div>
+                                    <span className="text-zinc-700 dark:text-zinc-300">{displayLabel}</span>
+                                    {isOtherOption && (
+                                        <input
+                                            type="text"
+                                            placeholder="Please specify..."
+                                            value={isOtherSelected ? (responses[question.id] as string) : ""}
+                                            onChange={(e) => updateResponse(question.id, e.target.value)}
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                // Also select "Other" when clicking the text field
+                                                if (!isOtherSelected && responses[question.id] !== "") {
+                                                    updateResponse(question.id, "");
+                                                }
+                                            }}
+                                            className="flex-1 bg-transparent border-b border-zinc-300 dark:border-zinc-600 focus:border-[#007b8a] outline-none px-2 text-zinc-700 dark:text-zinc-300"
+                                        />
                                     )}
-                                </div>
-                                <span className="text-zinc-700 dark:text-zinc-300">{option}</span>
-                            </label>
-                        ))}
+                                </label>
+                            );
+                        })}
                     </div>
                 );
 
@@ -993,47 +1053,62 @@ export function CustomApplicationForm({ onSubmitSuccess }: CustomApplicationForm
             )}
 
             {/* Form Header */}
-            <div className="bg-gradient-to-r from-indigo-600 to-purple-600 px-8 py-10 text-center relative overflow-hidden">
-                {/* Type Toggle */}
-                <div className="absolute top-4 right-4 z-10">
-                    <div className="inline-flex p-1 bg-white/20 backdrop-blur-md rounded-xl border border-white/30">
-                        <button
-                            onClick={() => setFormType("competitor")}
-                            className={`px-4 py-1.5 rounded-lg text-sm font-semibold transition-all ${formType === "competitor"
-                                ? "bg-white text-indigo-600 shadow-lg"
-                                : "text-white hover:bg-white/10"
-                                }`}
-                        >
-                            Competitor
-                        </button>
-                        <button
-                            onClick={() => setFormType("attendee")}
-                            className={`px-4 py-1.5 rounded-lg text-sm font-semibold transition-all ${formType === "attendee"
-                                ? "bg-white text-indigo-600 shadow-lg"
-                                : "text-white hover:bg-white/10"
-                                }`}
-                        >
-                            Attendee
-                        </button>
-                    </div>
-                </div>
-
-                <div className="relative z-0">
-                    <h3 className="text-2xl font-bold text-white">{formData.title}</h3>
-                    <p className="mt-2 text-indigo-100">{formData.description}</p>
-                    {session && (
-                        <div className="mt-3 flex items-center justify-center gap-3">
-                            <p className="text-sm text-indigo-200">
-                                Signed in as {session.user?.email}
-                            </p>
-                            <button
-                                onClick={() => signOut()}
-                                className="text-xs px-3 py-1 rounded-full bg-white/20 hover:bg-white/30 text-white transition-colors"
+            <div className="bg-white dark:bg-zinc-900 px-8 py-10 border-b border-zinc-100 dark:border-zinc-800 relative">
+                <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-6">
+                    <div className="flex-1">
+                        <h3 className="text-3xl font-bold text-zinc-900 dark:text-white tracking-tight">{formData.title}</h3>
+                        <div className="mt-2 text-zinc-600 dark:text-zinc-400 text-lg leading-relaxed">
+                            <ReactMarkdown
+                                components={{
+                                    p: ({ node, ...props }) => <p className="mb-2 last:mb-0" {...props} />,
+                                    a: ({ node, ...props }) => <a className="text-[#007b8a] hover:underline" target="_blank" rel="noopener noreferrer" {...props} />,
+                                    ul: ({ node, ...props }) => <ul className="list-disc pl-4 mb-2 space-y-1" {...props} />,
+                                    ol: ({ node, ...props }) => <ol className="list-decimal pl-4 mb-2 space-y-1" {...props} />,
+                                    strong: ({ node, ...props }) => <strong className="font-bold text-zinc-800 dark:text-zinc-200" {...props} />,
+                                }}
                             >
-                                Sign out
+                                {formData.description}
+                            </ReactMarkdown>
+                        </div>
+
+                        {session && (
+                            <div className="mt-4 flex items-center gap-3">
+                                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400">
+                                    {session.user?.email}
+                                </span>
+                                <button
+                                    onClick={() => signOut()}
+                                    className="text-xs text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors underline decoration-dotted"
+                                >
+                                    Sign out
+                                </button>
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Type Toggle - Segmented Control */}
+                    <div className="shrink-0">
+                        <div className="inline-flex p-1 bg-zinc-100 dark:bg-zinc-800 rounded-lg">
+                            <button
+                                onClick={() => setFormType("competitor")}
+                                className={`px-4 py-2 rounded-md text-sm font-semibold transition-all ${formType === "competitor"
+                                    ? "bg-white dark:bg-zinc-700 text-zinc-900 dark:text-white shadow-sm"
+                                    : "text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200"
+                                    }`}
+                            >
+                                Competitor
+                            </button>
+                            <button
+                                onClick={() => setFormType("attendee")}
+                                className={`px-4 py-2 rounded-md text-sm font-semibold transition-all ${formType === "attendee"
+                                    ? "bg-white dark:bg-zinc-700 text-zinc-900 dark:text-white shadow-sm"
+                                    : "text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200"
+                                    }`}
+                            >
+                                Attendee
                             </button>
                         </div>
-                    )}
+                    </div>
                 </div>
             </div>
 
@@ -1047,39 +1122,83 @@ export function CustomApplicationForm({ onSubmitSuccess }: CustomApplicationForm
                         // Skip hidden questions entirely to avoid spacing issues
                         if (!visible) return null;
 
-                        // Increment the visible question counter
+                        // Handle section headers differently - Clean, bold typography
+                        if (question.type === "section_header") {
+                            return (
+                                <div
+                                    key={`${question.id}-${index}`}
+                                    className="pt-12 pb-6 mt-6 first:mt-0"
+                                >
+                                    <div>
+                                        <h3 className="text-2xl md:text-3xl font-bold text-zinc-900 dark:text-white tracking-tight">
+                                            {question.label}
+                                        </h3>
+                                        {question.description && (
+                                            <div className="mt-3 text-base text-zinc-600 dark:text-zinc-400 max-w-2xl leading-relaxed">
+                                                <ReactMarkdown
+                                                    components={{
+                                                        p: ({ node, ...props }) => <p className="mb-2 last:mb-0" {...props} />,
+                                                        a: ({ node, ...props }) => <a className="text-[#007b8a] hover:underline" target="_blank" rel="noopener noreferrer" {...props} />,
+                                                        ul: ({ node, ...props }) => <ul className="list-disc pl-4 mb-2 space-y-1" {...props} />,
+                                                        ol: ({ node, ...props }) => <ol className="list-decimal pl-4 mb-2 space-y-1" {...props} />,
+                                                        strong: ({ node, ...props }) => <strong className="font-bold text-zinc-800 dark:text-zinc-200" {...props} />,
+                                                    }}
+                                                >
+                                                    {question.description}
+                                                </ReactMarkdown>
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            );
+                        }
+
+                        // Increment the visible question counter (only for actual questions)
                         visibleCount++;
                         const questionNumber = visibleCount;
-
-                        // Find if there's a previous visible question to show border
-                        let hasPrevVisible = false;
-                        for (let i = index - 1; i >= 0; i--) {
-                            if (isQuestionVisible(i)) {
-                                hasPrevVisible = true;
-                                break;
-                            }
-                        }
 
                         return (
                             <div
                                 key={`${question.id}-${index}`}
-                                className={`py-8 ${hasPrevVisible ? 'border-t border-zinc-200 dark:border-zinc-800' : ''}`}
+                                className="py-6"
                             >
-                                <label className="block mb-4">
-                                    <span className="text-xs font-medium text-[#007b8a] dark:text-[#007b8a] uppercase tracking-wide">
-                                        Question {questionNumber}
-                                    </span>
-                                    <h4 className="mt-1 text-lg font-medium text-zinc-900 dark:text-white">
-                                        {question.label}
-                                        {question.required && <span className="text-red-500 ml-1">*</span>}
-                                    </h4>
+                                <label className="block mb-5">
+                                    <div className="flex items-baseline gap-3 mb-2">
+                                        <span className="text-sm font-bold text-[#007b8a] dark:text-[#007b8a] uppercase tracking-wider shrink-0">
+                                            Q{questionNumber}
+                                        </span>
+                                        <h4 className="text-xl font-medium text-zinc-900 dark:text-white leading-snug">
+                                            {question.label}
+                                            {question.required && <span className="text-red-500 ml-1" title="Required">*</span>}
+                                        </h4>
+                                    </div>
+                                    {question.description && (
+                                        <div className="ml-0 sm:ml-9 mt-1 text-sm text-zinc-500 dark:text-zinc-400">
+                                            <ReactMarkdown
+                                                components={{
+                                                    p: ({ node, ...props }) => <p className="mb-2 last:mb-0" {...props} />,
+                                                    a: ({ node, ...props }) => <a className="text-[#007b8a] hover:underline" target="_blank" rel="noopener noreferrer" {...props} />,
+                                                    ul: ({ node, ...props }) => <ul className="list-disc pl-4 mb-2 space-y-1" {...props} />,
+                                                    ol: ({ node, ...props }) => <ol className="list-decimal pl-4 mb-2 space-y-1" {...props} />,
+                                                    strong: ({ node, ...props }) => <strong className="font-bold text-zinc-700 dark:text-zinc-300" {...props} />,
+                                                }}
+                                            >
+                                                {question.description}
+                                            </ReactMarkdown>
+                                        </div>
+                                    )}
                                 </label>
-                                {renderQuestion(question)}
-                                {validationErrors[question.id] && (
-                                    <p className="mt-2 text-sm text-red-500 font-medium animate-pulse">
-                                        {validationErrors[question.id]}
-                                    </p>
-                                )}
+                                <div className="ml-0 sm:ml-9">
+                                    {renderQuestion(question)}
+                                    {validationErrors[question.id] && (
+                                        <p className="mt-2 text-sm text-red-500 font-medium animate-pulse flex items-center gap-1">
+                                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                            </svg>
+                                            {validationErrors[question.id]}
+                                        </p>
+                                    )}
+                                </div>
                             </div>
                         );
                     });
