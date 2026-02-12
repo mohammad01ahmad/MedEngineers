@@ -1,7 +1,10 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { CustomApplicationForm } from "./CustomApplicationForm";
+import { onAuthStateChanged, signOut } from "firebase/auth";
+import { useTicketTailorWidget } from "@/hooks/useTicketTailorWidget";
+import { auth } from "@/lib/Firebase";
 
 type UserStatus = "guest" | "pending" | "approved" | "domain_ai";
 
@@ -31,6 +34,96 @@ interface SubmissionResult {
 export function RegistrationSection() {
   // Mock state to demonstrate the flow. In a real app, this comes from the backend.
   const [status, setStatus] = useState<UserStatus>("guest");
+  const [currentUser, setCurrentUser] = useState<any>(null);
+
+  // Check if user has submitted form or not using onAuthStateChange
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      if (user) {
+        try {
+          // Send the UID to check against your collections
+          const res = await fetch("/api/user-status", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ uid: user.uid }),
+          });
+
+          const data = await res.json();
+          // If the API confirms submission, update the status based on actualStatus
+          if (data.status === true) {
+            // Use the actual status from the backend (pending, accepted, rejected)
+            const actualStatus = data.actualStatus?.toLowerCase();
+            if (actualStatus === "accepted") {
+              setStatus("approved");
+            } else if (actualStatus === "rejected") {
+              setStatus("guest"); // Or you could add a "rejected" state
+            } else {
+              setStatus("pending");
+            }
+
+            // Store user in a state
+            setCurrentUser(user);
+
+          } else {
+            setStatus("guest");
+            setCurrentUser(null);
+          }
+        } catch (error) {
+          console.error("Auth check failed", error);
+          setCurrentUser(null);
+        }
+      } else {
+        setStatus("guest");
+        setCurrentUser(null);
+      }
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // Add periodic status checking for pending users
+  useEffect(() => {
+    if (status === "pending" && currentUser) {
+      const interval = setInterval(async () => {
+        try {
+          const res = await fetch("/api/user-status", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ uid: currentUser.uid }),
+          });
+
+          const data = await res.json();
+          if (data.status === true) {
+            const actualStatus = data.actualStatus?.toLowerCase();
+            if (actualStatus === "accepted") {
+              setStatus("approved");
+              clearInterval(interval); // Stop checking once approved
+            } else if (actualStatus === "rejected") {
+              setStatus("guest");
+              clearInterval(interval); // Stop checking once rejected
+            }
+          }
+        } catch (error) {
+          console.error("Periodic status check failed", error);
+        }
+      }, 10000); // Check every 10 seconds
+
+      return () => clearInterval(interval); // Cleanup on unmount or status change
+    }
+  }, [status, currentUser]);
+
+  // Handle payment - now using Ticket Tailor widget
+  const handlePayment = () => {
+    // The actual payment handling is now done by the Ticket Tailor widget
+    console.log('Payment handled by Ticket Tailor widget');
+  };
+
+  // Handle logout
+  const handleLogout = () => {
+    signOut(auth);
+  };
+
+  // Initialize Ticket Tailor widget
+  const ticketWidgetRef = useTicketTailorWidget();
 
   // Domain AI state
   const [domainLoading, setDomainLoading] = useState(false);
@@ -467,15 +560,14 @@ export function RegistrationSection() {
               <div className="bg-[#007b8a] px-6 py-4">
                 <h3 className="text-white font-semibold">Official Ticket Counter</h3>
               </div>
-              <div className="p-10 text-center">
-                <div className="p-12 border-2 border-dashed border-zinc-300 dark:border-zinc-700 rounded-xl bg-zinc-50 dark:bg-black/20">
-                  <p className="text-zinc-500 dark:text-zinc-400 italic mb-4">[Ticket Tailor Widget Loads Here]</p>
-                  <button
-                    className="inline-flex items-center gap-2 px-6 py-3 bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 rounded-md font-semibold hover:opacity-90"
-                    onClick={() => alert("Launching Ticket Tailor Checkout...")}
-                  >
-                    Purchase Ticket ($25)
-                  </button>
+              <div className="p-6">
+                <div 
+                  ref={ticketWidgetRef}
+                  className="min-h-[400px] flex items-center justify-center"
+                >
+                  <div className="text-center p-4">
+                    <p className="text-zinc-500 dark:text-zinc-400 italic">Loading ticket information...</p>
+                  </div>
                 </div>
               </div>
             </div>
