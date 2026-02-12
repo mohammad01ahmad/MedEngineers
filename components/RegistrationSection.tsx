@@ -2,6 +2,8 @@
 
 import { useState, useEffect } from "react";
 import { CustomApplicationForm } from "./CustomApplicationForm";
+import { onAuthStateChanged, signOut } from "firebase/auth";
+import { auth } from "@/lib/Firebase";
 
 type UserStatus = "guest" | "pending" | "approved" | "domain_ai";
 
@@ -31,6 +33,85 @@ interface SubmissionResult {
 export function RegistrationSection() {
   // Mock state to demonstrate the flow. In a real app, this comes from the backend.
   const [status, setStatus] = useState<UserStatus>("guest");
+  const [currentUser, setCurrentUser] = useState<any>(null);
+
+  // Check if user has submitted form or not using onAuthStateChange
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      if (user) {
+        try {
+          // Send the UID to check against your collections
+          const res = await fetch("/api/user-status", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ uid: user.uid }),
+          });
+
+          const data = await res.json();
+          // If the API confirms submission, update the status
+          if (data.status === true) {
+            setStatus("pending");
+
+            // Store user in a state
+            setCurrentUser(user);
+
+          } else {
+            setStatus("guest");
+            setCurrentUser(null);
+          }
+        } catch (error) {
+          console.error("Auth check failed", error);
+          setCurrentUser(null);
+        }
+      } else {
+        setStatus("guest");
+        setCurrentUser(null);
+      }
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // Handle payment
+  const handlePayment = async () => {
+    if (!currentUser?.uid) {
+      alert("Authentication error. Please refresh and try again.");
+      return;
+    }
+    const currentUid = currentUser.uid; // Get UID directly from the Auth instance
+
+    if (!currentUid) {
+      alert("Authentication error. Please refresh and try again.");
+      return;
+    }
+    try {
+      const res = await fetch("api/payment/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          uid: currentUid
+        }),
+      });
+
+      // 1. You MUST parse the body to get the actual data out of the ReadableStream
+      const data = await res.json();
+
+      // 2. Now 'data' contains the { url: "..." } from your API
+      if (data.url) {
+        console.log("Redirecting to Ticket Tailor:", data.url);
+        window.location.href = data.url; // This performs the redirect
+      } else if (data.error) {
+        console.error("API Error:", data.error);
+        alert(`Error: ${data.error}`);
+      }
+    } catch (error) {
+      console.error("Payment generation failed", error);
+    }
+  }
+
+  // Handle logout
+  const handleLogout = () => {
+    signOut(auth);
+  };
 
   // Domain AI state
   const [domainLoading, setDomainLoading] = useState(false);
@@ -129,6 +210,8 @@ export function RegistrationSection() {
     <section id="registration" className="py-24 bg-white dark:bg-zinc-950">
       <div className="mx-auto max-w-7xl px-6 lg:px-8">
 
+
+        {/* COMMENTED OUT THE DEV SECTION -- BY AHMAD*/}
         {/* DEV ONLY: State Toggles to visualize the flow */}
         <div className="mb-12 flex flex-wrap justify-center gap-4 p-4 rounded-lg bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 w-fit mx-auto">
           <span className="text-xs font-mono uppercase text-zinc-500 self-center">Dev Preview:</span>
@@ -145,7 +228,7 @@ export function RegistrationSection() {
             </button>
           ))}
 
-          {/* Divider */}
+
           <div className="w-px h-6 bg-zinc-300 dark:bg-zinc-700 self-center mx-2" />
 
           {/* Domain AI Button */}
@@ -437,6 +520,7 @@ export function RegistrationSection() {
             <div className="mt-8 p-4 rounded-lg bg-zinc-50 dark:bg-zinc-900 inline-block text-left text-sm text-zinc-500">
               <p><strong>Status:</strong> <span className="text-yellow-600 dark:text-yellow-500 font-semibold">Pending Review</span></p>
               <p suppressHydrationWarning><strong>Applied:</strong> {new Date().toLocaleDateString()}</p>
+              <p><button onClick={() => handleLogout()} className="font-semibold hover:underline hover:cursor-pointer">Logout</button></p>
             </div>
           </div>
         )}
@@ -472,7 +556,7 @@ export function RegistrationSection() {
                   <p className="text-zinc-500 dark:text-zinc-400 italic mb-4">[Ticket Tailor Widget Loads Here]</p>
                   <button
                     className="inline-flex items-center gap-2 px-6 py-3 bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 rounded-md font-semibold hover:opacity-90"
-                    onClick={() => alert("Launching Ticket Tailor Checkout...")}
+                    onClick={() => handlePayment()}
                   >
                     Purchase Ticket ($25)
                   </button>
