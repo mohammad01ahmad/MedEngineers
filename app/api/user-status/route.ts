@@ -13,13 +13,27 @@ export async function POST(req: NextRequest) {
         // 1. Check Attendees collection
         const userDoc = await adminDb.collection("attendees").doc(uid).get();
         if (userDoc.exists && userDoc.data()?.submitted === true) {
-            return NextResponse.json({ status: true, type: "attendee" }, { status: 200 });
+            const userData = userDoc.data();
+            if (userData) {
+                return NextResponse.json({ 
+                    status: true, 
+                    type: "attendee",
+                    actualStatus: userData.status || "pending"
+                }, { status: 200 });
+            }
         }
 
         // 2. Check Competitors collection
         const competitorDoc = await adminDb.collection("competitors").doc(uid).get();
         if (competitorDoc.exists && competitorDoc.data()?.submitted === true) {
-            return NextResponse.json({ status: true, type: "competitor" }, { status: 200 });
+            const competitorData = competitorDoc.data();
+            if (competitorData) {
+                return NextResponse.json({ 
+                    status: true, 
+                    type: "competitor",
+                    actualStatus: competitorData.status || "pending"
+                }, { status: 200 });
+            }
         }
 
         return NextResponse.json({ status: false }, { status: 200 });
