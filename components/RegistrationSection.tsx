@@ -230,21 +230,7 @@ export function RegistrationSection() {
     }
   };
 
-  const handleCheckStatus = async () => {
-    setIsCheckingStatus(true);
-    setStatusCheckMessage(""); // Clear any previous messages
-    setHasCheckedStatus(false); // Reset check status
-    try {
-      await signInWithGoogle();
-      setHasCheckedStatus(true); // Mark that we performed a status check
-      // The useEffect will handle the status check after sign-in
-    } catch (error) {
-      console.error("Error checking status:", error);
-      setStatusCheckMessage("Failed to sign in. Please try again.");
-    } finally {
-      setIsCheckingStatus(false);
-    }
-  };
+
 
   const getDomainColor = (domain: string) => {
     switch (domain) {
@@ -789,13 +775,12 @@ export function RegistrationSection() {
               </div>
               <div className="p-6">
                 <TicketTailorWidget />
-              </div >
-            </div >
-          </div >
-        )
-        }
+              </div>
+            </div>
+          </div>
+        )}
 
-      </div >
-    </section >
+      </div>
+    </section>
   );
 }
