@@ -5,6 +5,8 @@ import { CustomApplicationForm } from "./CustomApplicationForm";
 import { onAuthStateChanged, signOut } from "firebase/auth";
 import { useTicketTailorWidget } from "@/hooks/useTicketTailorWidget";
 import { auth } from "@/lib/Firebase";
+import { Button } from "@/components/ui/button";
+import { useAuth } from "@/lib/AuthContext";
 
 type UserStatus = "guest" | "pending" | "approved" | "domain_ai";
 
@@ -35,6 +37,10 @@ export function RegistrationSection() {
   // Mock state to demonstrate the flow. In a real app, this comes from the backend.
   const [status, setStatus] = useState<UserStatus>("guest");
   const [currentUser, setCurrentUser] = useState<any>(null);
+  const [isCheckingStatus, setIsCheckingStatus] = useState(false);
+  const [statusCheckMessage, setStatusCheckMessage] = useState<string>("");
+  const [hasCheckedStatus, setHasCheckedStatus] = useState(false);
+  const { signInWithGoogle } = useAuth();
 
   // Check if user has submitted form or not using onAuthStateChange
   useEffect(() => {
@@ -61,12 +67,25 @@ export function RegistrationSection() {
               setStatus("pending");
             }
 
-            // Store user in a state
-            setCurrentUser(user);
+            // Store user and submission info in state
+            setCurrentUser({
+              ...user,
+              hasSubmitted: true,
+              submissionType: data.type,
+              actualStatus: actualStatus
+            });
 
           } else {
             setStatus("guest");
-            setCurrentUser(null);
+            setCurrentUser({
+              ...user,
+              hasSubmitted: false
+            });
+
+            // If we just checked status and no application was found, show helpful message
+            if (hasCheckedStatus) {
+              setStatusCheckMessage("No application found for this account. You may need to submit an application first, or check if you used a different Google account.");
+            }
           }
         } catch (error) {
           console.error("Auth check failed", error);
@@ -82,7 +101,7 @@ export function RegistrationSection() {
 
   // Add periodic status checking for pending users
   useEffect(() => {
-    if (status === "pending" && currentUser) {
+    if (status === "pending" && currentUser?.hasSubmitted) {
       const interval = setInterval(async () => {
         try {
           const res = await fetch("/api/user-status", {
@@ -96,9 +115,11 @@ export function RegistrationSection() {
             const actualStatus = data.actualStatus?.toLowerCase();
             if (actualStatus === "accepted") {
               setStatus("approved");
+              setCurrentUser((prev: any) => prev ? { ...prev, actualStatus: "accepted" } : null);
               clearInterval(interval); // Stop checking once approved
             } else if (actualStatus === "rejected") {
               setStatus("guest");
+              setCurrentUser((prev: any) => prev ? { ...prev, hasSubmitted: false, actualStatus: "rejected" } : null);
               clearInterval(interval); // Stop checking once rejected
             }
           }
@@ -191,6 +212,22 @@ export function RegistrationSection() {
     }
   };
 
+  const handleCheckStatus = async () => {
+    setIsCheckingStatus(true);
+    setStatusCheckMessage(""); // Clear any previous messages
+    setHasCheckedStatus(false); // Reset check status
+    try {
+      await signInWithGoogle();
+      setHasCheckedStatus(true); // Mark that we performed a status check
+      // The useEffect will handle the status check after sign-in
+    } catch (error) {
+      console.error("Error checking status:", error);
+      setStatusCheckMessage("Failed to sign in. Please try again.");
+    } finally {
+      setIsCheckingStatus(false);
+    }
+  };
+
   const getDomainColor = (domain: string) => {
     switch (domain) {
       case "A": return { bg: "#e9456015", border: "#e94560", text: "#e94560", gradient: "from-red-500 to-pink-600" };
@@ -221,6 +258,35 @@ export function RegistrationSection() {
   return (
     <section id="registration" className="py-24 bg-white dark:bg-zinc-950">
       <div className="mx-auto max-w-7xl px-6 lg:px-8">
+
+        {/* Global User Header & Logout */}
+        {currentUser && (
+          <div className="mb-8 flex items-center justify-between p-4 rounded-2xl bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-sm animate-in fade-in slide-in-from-top-4 duration-500">
+            <div className="flex items-center gap-4">
+              <div className="w-10 h-10 rounded-full bg-[#007b8a]/10 flex items-center justify-center text-[#007b8a]">
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                </svg>
+              </div>
+              <div className="flex flex-col">
+                <span className="text-xs font-bold text-[#007b8a] uppercase tracking-wider">Signed in as</span>
+                <span className="text-sm font-medium text-zinc-900 dark:text-white truncate max-w-[150px] sm:max-w-none">
+                  {currentUser.displayName || currentUser.email}
+                </span>
+              </div>
+            </div>
+            <Button
+              variant="outline"
+              onClick={handleLogout}
+              className="h-9 px-4 rounded-full border-red-200 dark:border-red-900/30 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-all text-xs font-bold uppercase tracking-wider"
+            >
+              <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+              </svg>
+              Logout
+            </Button>
+          </div>
+        )}
 
         {/* DEV ONLY: State Toggles to visualize the flow */}
         <div className="mb-12 flex flex-wrap justify-center gap-4 p-4 rounded-lg bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 w-fit mx-auto">
@@ -501,6 +567,128 @@ export function RegistrationSection() {
               </p>
             </div>
 
+            {/* Status Check Result Message */}
+            {hasCheckedStatus && statusCheckMessage && (
+              <div className="mx-auto max-w-4xl mb-8">
+                <div className={`rounded-xl p-6 border ${statusCheckMessage.includes("No application")
+                    ? "bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800"
+                    : "bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800"
+                  }`}>
+                  <div className="text-center">
+                    {statusCheckMessage.includes("No application") ? (
+                      <>
+                        <div className="w-12 h-12 bg-blue-100 dark:bg-blue-900/30 rounded-full flex items-center justify-center mx-auto mb-4">
+                          <svg className="w-6 h-6 text-blue-600 dark:text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                          </svg>
+                        </div>
+                        <h3 className="text-lg font-semibold text-blue-900 dark:text-blue-100 mb-2">
+                          No Application Found
+                        </h3>
+                        <p className="text-blue-700 dark:text-blue-300 mb-4">
+                          We couldn't find an application associated with your account. This could mean:
+                        </p>
+                        <ul className="text-left text-blue-700 dark:text-blue-300 space-y-2 mb-4">
+                          <li>• You haven't submitted an application yet</li>
+                          <li>• You used a different Google account to apply</li>
+                          <li>• Your application is still being processed</li>
+                        </ul>
+                        <p className="text-blue-700 dark:text-blue-300 font-medium">
+                          Please fill out the application form below to get started!
+                        </p>
+                      </>
+                    ) : (
+                      <>
+                        <div className="w-12 h-12 bg-red-100 dark:bg-red-900/30 rounded-full flex items-center justify-center mx-auto mb-4">
+                          <svg className="w-6 h-6 text-red-600 dark:text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                          </svg>
+                        </div>
+                        <h3 className="text-lg font-semibold text-red-900 dark:text-red-100 mb-2">
+                          Error
+                        </h3>
+                        <p className="text-red-700 dark:text-red-300">
+                          {statusCheckMessage}
+                        </p>
+                      </>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Status Check Section for Existing Applicants - Only show if not logged in */}
+            {!currentUser && (
+              <div className="mx-auto max-w-4xl mb-8">
+                <div className="bg-zinc-50 dark:bg-zinc-900 rounded-xl p-6 border border-zinc-200 dark:border-zinc-800">
+                  <div className="text-center">
+                    <h3 className="text-lg font-semibold text-zinc-900 dark:text-white mb-2">
+                      Already submitted your application?
+                    </h3>
+                    <p className="text-sm text-zinc-600 dark:text-zinc-400 mb-4">
+                      Sign in to check your application status and updates
+                    </p>
+                    <Button
+                      variant="outline"
+                      onClick={handleCheckStatus}
+                      disabled={isCheckingStatus}
+                      className="bg-white dark:bg-zinc-800 border-[#007b8a] text-[#007b8a] hover:bg-[#007b8a] hover:text-white"
+                    >
+                      {isCheckingStatus ? (
+                        <>
+                          <div className="w-4 h-4 border-2 border-[#007b8a] border-t-transparent rounded-full animate-spin mr-2" />
+                          Checking Status...
+                        </>
+                      ) : (
+                        <>
+                          <svg className="w-4 h-4 mr-2" viewBox="0 0 24 24">
+                            <path
+                              fill="#007b8a"
+                              d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
+                            />
+                            <path
+                              fill="#34A853"
+                              d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
+                            />
+                            <path
+                              fill="#FBBC05"
+                              d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"
+                            />
+                            <path
+                              fill="#EA4335"
+                              d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
+                            />
+                          </svg>
+                          Check Application Status
+                        </>
+                      )}
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Sign Out Section - Only show if logged in but no application */}
+            {currentUser && !currentUser?.hasSubmitted && (
+              <div className="mx-auto max-w-4xl mb-8">
+                <div className="bg-blue-50 dark:bg-blue-900/20 rounded-xl p-6 border border-blue-200 dark:border-blue-800">
+                  <div className="text-center">
+                    <div className="w-12 h-12 bg-blue-100 dark:bg-blue-900/30 rounded-full flex items-center justify-center mx-auto mb-4">
+                      <svg className="w-6 h-6 text-blue-600 dark:text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                    </div>
+                    <h3 className="text-lg font-semibold text-blue-900 dark:text-blue-100 mb-2">
+                      Ready to Apply?
+                    </h3>
+                    <p className="text-blue-700 dark:text-blue-300">
+                      We couldn't find an application for this account. Please fill out the form below to get started.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+
             <div className="mx-auto max-w-4xl">
               {/* Custom Styled Form with built-in submit */}
               <CustomApplicationForm onSubmitSuccess={() => setStatus("pending")} />
@@ -527,10 +715,22 @@ export function RegistrationSection() {
             <p className="mt-4 text-lg text-zinc-600 dark:text-zinc-300">
               Thanks for applying! Our team is reviewing your eligibility. We will notify you via email once a decision has been made.
             </p>
-            <div className="mt-8 p-4 rounded-lg bg-zinc-50 dark:bg-zinc-900 inline-block text-left text-sm text-zinc-500">
-              <p><strong>Status:</strong> <span className="text-yellow-600 dark:text-yellow-500 font-semibold">Pending Review</span></p>
-              <p suppressHydrationWarning><strong>Applied:</strong> {new Date().toLocaleDateString()}</p>
-            </div>
+
+            {/* User info and submission details */}
+            {currentUser && (
+              <div className="mt-8 space-y-4">
+                <div className="p-4 rounded-lg bg-zinc-50 dark:bg-zinc-900 inline-block text-left text-sm text-zinc-500">
+                  <p><strong>Applicant:</strong> {currentUser.displayName || currentUser.email}</p>
+                  <p><strong>Application Type:</strong> {currentUser.submissionType === 'attendee' ? 'Attendee' : 'Competitor'}</p>
+                  <p><strong>Status:</strong> <span className="text-yellow-600 dark:text-yellow-500 font-semibold">Pending Review</span></p>
+                  <p suppressHydrationWarning><strong>Applied:</strong> {new Date().toLocaleDateString()}</p>
+                </div>
+
+                <div className="text-xs text-zinc-400 dark:text-zinc-500">
+                  <p>This page automatically refreshes every 10 seconds to check for status updates.</p>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -549,11 +749,20 @@ export function RegistrationSection() {
                 You're In!
               </h2>
               <p className="text-xl font-bold tracking-tight text-zinc-900 dark:text-white sm:text-2xl">
-                Congratulations!
+                Congratulations, {currentUser?.displayName || 'Applicant'}!
               </p>
               <p className="mt-4 text-lg text-zinc-600 dark:text-zinc-400">
                 Your application has been approved. Secure your ticket below to confirm your spot.
               </p>
+
+              {/* Application summary */}
+              {currentUser && (
+                <div className="mt-6 p-4 rounded-lg bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 inline-block text-left text-sm">
+                  <p className="text-green-800 dark:text-green-200">
+                    <strong>Application Type:</strong> {currentUser.submissionType === 'attendee' ? 'Attendee' : 'Competitor'}
+                  </p>
+                </div>
+              )}
             </div>
 
             <div className="mx-auto max-w-4xl bg-white dark:bg-zinc-900 rounded-3xl shadow-xl ring-1 ring-zinc-200 dark:ring-zinc-800 overflow-hidden">
@@ -561,7 +770,7 @@ export function RegistrationSection() {
                 <h3 className="text-white font-semibold">Official Ticket Counter</h3>
               </div>
               <div className="p-6">
-                <div 
+                <div
                   ref={ticketWidgetRef}
                   className="min-h-[400px] flex items-center justify-center"
                 >

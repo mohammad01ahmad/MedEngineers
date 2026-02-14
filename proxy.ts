@@ -1,41 +1,41 @@
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
+import { adminAuth } from '@/lib/firebaseAdmin'
 
 export async function proxy(request: NextRequest) {
-    const session = request.cookies.get('session')?.value
+    // Only protect admin dashboard routes
+    if (request.nextUrl.pathname.startsWith('/admin/dashboard')) {
+        const session = request.cookies.get('session')?.value
 
-    // If no session cookie, redirect to login
-    if (!session) {
-        console.log('No session found, redirecting to login')
-        return NextResponse.redirect(new URL('/login', request.url))
-    }
-
-    try {
-        // Verify the session with your backend
-        const baseUrl = request.nextUrl.origin
-        const response = await fetch(`${baseUrl}/api/verify-session`, {
-            headers: {
-                Cookie: `session=${session}`,
-            },
-        })
-
-        if (!response.ok) {
-            console.log('Session verification failed, redirecting to login')
-            // Clear the invalid session cookie
-            const res = NextResponse.redirect(new URL('/login', request.url))
-            res.cookies.delete('session')
-            return res
+        // If no session cookie, redirect to admin login
+        if (!session) {
+            console.log('No admin session found, redirecting to /admin')
+            return NextResponse.redirect(new URL('/admin', request.url))
         }
 
-        // Session is valid and user has admin claim
-        return NextResponse.next()
-    } catch (error) {
-        console.error('Middleware error:', error)
-        return NextResponse.redirect(new URL('/login', request.url))
+        try {
+            // Verify the session with Firebase Admin
+            const decodedClaims = await adminAuth.verifySessionCookie(session)
+            
+            // Check if user has admin privileges
+            if (!decodedClaims.admin) {
+                console.log('User lacks admin privileges, redirecting to /admin')
+                return NextResponse.redirect(new URL('/admin', request.url))
+            }
+
+            // Session is valid and user has admin claim
+            return NextResponse.next()
+        } catch (error) {
+            console.error('Admin proxy error:', error)
+            return NextResponse.redirect(new URL('/admin', request.url))
+        }
     }
+
+    // For all other routes, continue normally
+    return NextResponse.next()
 }
 
-// Protect all admin-dashboard routes
+// Protect admin dashboard routes
 export const config = {
-    matcher: '/admin-dashboard/:path*',
+    matcher: '/admin/dashboard/:path*',
 }
