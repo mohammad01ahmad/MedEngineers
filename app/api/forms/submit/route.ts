@@ -222,8 +222,8 @@ export async function POST(req: NextRequest) {
                     }, { merge: true });
                 }
 
-                if (responses["563534208"] === "Medicine") {
-                    // Store the form submission to Firebase collection competitor (Medicine)
+                if (responses["563534208"] === "Medicine" || responses["563534208"] === "Healthcare") {
+                    // Store the form submission to Firebase collection competitor (Medicine/Healthcare)
                     await adminDb.collection("competitors").doc(uid).set({
                         fullName: responses["1706880442"] || "",
                         email: responses["464604082"] || "",

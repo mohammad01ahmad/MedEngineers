@@ -102,7 +102,7 @@ export function validateCompetitorForm(data: any) {
 
   // Major validation for competitors
   const errors: string[] = [];
-  const validMajors = ["Engineering", "Medicine"];
+  const validMajors = ["Engineering", "Medicine", "Healthcare"];
 
   if (!data.major || !validMajors.includes(data.major)) {
     errors.push("Please select a valid major category");
@@ -214,9 +214,9 @@ export function validateCompetitorForm(data: any) {
         errors.push("Challenge answer must be less than 1000 characters");
       }
     }
-  } else if (data.major === "Medicine") {
+  } else if (data.major === "Medicine" || data.major === "Healthcare") {
 
-    // Major type validation for Medicine
+    // Major type validation for Medicine/Healthcare
     if (!data.majorType) {
       errors.push("Major type is required");
     } else if (data.majorType.length < 2) {
@@ -228,7 +228,7 @@ export function validateCompetitorForm(data: any) {
     // Year validation
     const validYears = ["Year 1", "Year 2", "Year 3", "Year 4", "Year 5", "Year 6", "Year 6+"];
     if (data.year && !validYears.includes(data.year)) {
-      errors.push("Invalid year selection for Medicine");
+      errors.push("Invalid year selection for Medicine/Healthcare");
     }
 
     // Skillset validation 
@@ -239,7 +239,8 @@ export function validateCompetitorForm(data: any) {
     ]
 
     if (!data.skillSet && data.skillSet.length !== '') {
-      if (data.major === "Medicine") {
+      // Apply to both Medicine and Healthcare
+      if (data.major === "Medicine" || data.major === "Healthcare") {
         if (!skillSet.includes(data.skillSet)) {
           errors.push("Invalid skillset selection");
         }
@@ -351,7 +352,8 @@ export function validateFormSubmission(data: unknown, type: "attendee" | "compet
       major: request.responses["1740303904"],
     }
   } else if (type === "competitor") {
-    if (request.responses["563534208"] === "Medicine") {
+    // Map Healthcare same as Medicine
+    if (request.responses["563534208"] === "Medicine" || request.responses["563534208"] === "Healthcare") {
       finalFormData = {
         fullName: request.responses["1706880442"] || "",
         email: request.responses["464604082"] || "",
@@ -395,7 +397,7 @@ export function validateFormSubmission(data: unknown, type: "attendee" | "compet
       // Reject any other major immediately
       return {
         success: false,
-        error: "Invalid major. Competitors must be Medicine or Engineering.",
+        error: "Invalid major. Competitors must be Medicine, Healthcare, or Engineering.",
         code: "INVALID_MAJOR"
       };
     }
