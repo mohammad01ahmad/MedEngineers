@@ -24,6 +24,20 @@ export async function POST(req: NextRequest) {
     try {
         logger.info('Form submission attempt', { requestId });
 
+        // 0. Rate limiting check (DISABLED FOR DEVELOPMENT)
+        // const rateLimit = rateLimitMiddleware(req);
+        // if (!rateLimit.success) {
+        //     logRateLimit('client', rateLimit.error || 'Unknown rate limit error');
+        //     return NextResponse.json(
+        //         {
+        //             error: "Too many requests. Please try again later.",
+        //             code: "RATE_LIMITED",
+        //             retryAfter: rateLimit.retryAfter
+        //         },
+        //         { status: 429 }
+        //     );
+        // }
+
         const body = await req.json();
         const { responses, type = "competitor", idToken } = body;
         formType = type;
@@ -149,7 +163,7 @@ export async function POST(req: NextRequest) {
                     nationality: responses["492691881"] || "",
                     emiratesID: responses["1368274746"] || "",
                     major: responses["1740303904"] || "",
-                    isPayed: false,
+                    isPaid: false,
                     submitted: true,
                     submittedAt: admin.firestore.FieldValue.serverTimestamp(),
                     updatedAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -196,7 +210,8 @@ export async function POST(req: NextRequest) {
                     // Store the form submission to Firebase collection competitor (Engineering)
                     await adminDb.collection("competitors").doc(uid).set({
                         fullName: responses["1706880442"] || "",
-                        email: responses["464604082"] || "",
+                        universityEmail: responses["464604082"] || "",
+                        email: decodedToken.email,
                         contactNo: responses["1329997643"] || "",
                         nationality: responses["492691881"] || "",
                         emiratesID: responses["1368274746"] || "",
@@ -216,7 +231,7 @@ export async function POST(req: NextRequest) {
                         submitted: true,
                         submittedAt: admin.firestore.FieldValue.serverTimestamp(),
                         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-                        isPayed: false,
+                        isPaid: false,
                         domain: "",
                         attended: false,
                     }, { merge: true });
@@ -226,7 +241,8 @@ export async function POST(req: NextRequest) {
                     // Store the form submission to Firebase collection competitor (Medicine/Healthcare)
                     await adminDb.collection("competitors").doc(uid).set({
                         fullName: responses["1706880442"] || "",
-                        email: responses["464604082"] || "",
+                        universityEmail: responses["464604082"] || "",
+                        email: decodedToken.email,
                         contactNo: responses["1329997643"] || "",
                         nationality: responses["492691881"] || "",
                         emiratesID: responses["1368274746"] || "",
@@ -244,7 +260,7 @@ export async function POST(req: NextRequest) {
                         submitted: true,
                         submittedAt: admin.firestore.FieldValue.serverTimestamp(),
                         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-                        isPayed: false,
+                        isPaid: false,
                         status: "pending",
                         domain: "",
                         attended: false,

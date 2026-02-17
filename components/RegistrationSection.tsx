@@ -8,7 +8,7 @@ import { auth } from "@/lib/Firebase";
 import { Button } from "@/components/ui/button";
 import { retrieveFormData, hasValidStoredData, clearStoredData } from "@/lib/secureStorage";
 
-type UserStatus = "guest" | "pending" | "approved" | "loading" | "domain_ai" | "payment_success" | "final_phase" | "domain_selection";
+type UserStatus = "guest" | "pending" | "approved" | "rejected" | "loading" | "domain_ai" | "payment_success" | "final_phase" | "domain_selection";
 
 // Domain recommendation types
 interface DomainScore {
@@ -44,82 +44,133 @@ export function RegistrationSection() {
   const [statusCheckMessage, setStatusCheckMessage] = useState<string>("");
   const [hasCheckedStatus, setHasCheckedStatus] = useState(false);
 
+  // State to track if user has already seen and dismissed the payment success screen
+  const [paymentSuccessDismissed, setPaymentSuccessDismissed] = useState(false);
+
   // States for Domain Selection (Dev View)
   const [selectedDomain, setSelectedDomain] = useState<string | null>(null);
   const [expandedDomain, setExpandedDomain] = useState<string | null>(null);
+  const [isUpdatingDomain, setIsUpdatingDomain] = useState(false);
+  const [isDomainConfirmed, setIsDomainConfirmed] = useState(false);
 
+  // Function to check user status and route appropriately
+  const checkUserStatus = async (user: any, retryCount = 0) => {
+    if (!user) {
+      setStatus("guest");
+      setCurrentUser(null);
+      return;
+    }
 
-  // Check if user has submitted form or not using onAuthStateChange
+    // Set loading immediately to prevent "Guest" UI flicker while fetching status
+    setStatus("loading");
+
+    try {
+      setIsCheckingStatus(true);
+      console.log(`Checking status for UID: ${user.uid} (Attempt ${retryCount + 1})`);
+
+      const res = await fetch("/api/user-status", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ uid: user.uid }),
+      });
+
+      const data = await res.json();
+      console.log("Status API Response:", data);
+
+      // If the API confirms submission (submitted: true)
+      if (data.status === true) {
+        const actualStatus = data.actualStatus?.toLowerCase();
+        const isEngineer = data.major === "Engineering";
+        const isPaid = data.isPaid === true;
+
+        clearStoredData();
+
+        // Determine UI Status based on User Type and Payment Status
+        if (isPaid) {
+          if (paymentSuccessDismissed || localStorage.getItem("medhack_payment_confirmed") === "true") {
+            // If already paid and dismissed, go to next phase
+            // Only Medicine/Healthcare gets domain_selection
+            const needsDomain = data.major === "Medicine" || data.major === "Healthcare";
+            setStatus(needsDomain ? "domain_selection" : "final_phase");
+          } else {
+            setStatus("payment_success");
+          }
+        } else {
+          // Not paid yet
+          if (isEngineer) {
+            // Engineers skip pending and go straight to payment widget (approved status)
+            setStatus("approved");
+          } else {
+            // Healthcare (Medicine) follows the normal flow: Pending -> Approved -> Widget
+            if (actualStatus === "accepted") {
+              setStatus("approved");
+            } else if (actualStatus === "rejected") {
+              setStatus("rejected");
+            } else {
+              setStatus("pending");
+            }
+          }
+        }
+
+        // Store user and submission info in state
+        setCurrentUser({
+          ...user,
+          hasSubmitted: true,
+          submissionType: data.type,
+          actualStatus: actualStatus,
+          isPaid: isPaid,
+          major: data.major
+        });
+
+      } else {
+        // No application in DB yet
+        if (retryCount < 3) {
+          console.log(`No application found yet, retrying in 1.5s... (${retryCount + 1}/3)`);
+          setTimeout(() => checkUserStatus(user, retryCount + 1), 1500);
+          return;
+        }
+
+        console.warn("No application found in DB after retries.");
+        clearStoredData();
+        setStatus("guest");
+        setCurrentUser({
+          ...user,
+          hasSubmitted: false
+        });
+
+        // If we just manually checked and no app found
+        if (hasCheckedStatus) {
+          setStatusCheckMessage("No application found for this account.");
+        }
+      }
+    } catch (error) {
+      console.error("Status check failed", error);
+      setStatus("guest");
+      setCurrentUser(null);
+    } finally {
+      setIsCheckingStatus(false);
+    }
+  };
+
+  // Auth Listener
   useEffect(() => {
     const checkLocalCache = () => {
-      if (typeof window !== 'undefined' && hasValidStoredData()) {
-        setStatus("pending")
+      if (typeof window !== 'undefined') {
+        if (hasValidStoredData()) {
+          setStatus("pending");
+        }
+        if (localStorage.getItem("medhack_payment_confirmed") === "true") {
+          setPaymentSuccessDismissed(true);
+        }
       }
     };
     checkLocalCache();
 
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      if (user) {
-        try {
-          // Send the UID to check against your collections
-          setIsCheckingStatus(true);
-          const res = await fetch("/api/user-status", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ uid: user.uid }),
-          });
-
-          const data = await res.json();
-
-          // If the API confirms submission, update the status based on actualStatus
-          if (data.status === true) {
-            const actualStatus = data.actualStatus?.toLowerCase();
-
-            clearStoredData();
-
-            if (actualStatus === "accepted") {
-              setStatus("approved");
-            } else if (actualStatus === "rejected") {
-              setStatus("guest"); // Or you could add a "rejected" state
-            } else {
-              setStatus("pending")
-            }
-
-            // Store user and submission info in state
-            setCurrentUser({
-              ...user,
-              hasSubmitted: true,
-              submissionType: data.type,
-              actualStatus: actualStatus
-            });
-
-          } else {
-            // no application in db
-            clearStoredData();
-            setStatus("guest");
-            setCurrentUser({
-              ...user,
-              hasSubmitted: false
-            });
-
-            // If we just checked status and no application was found, show helpful message
-            if (hasCheckedStatus) {
-              setStatusCheckMessage("No application found for this account. You may need to submit an application first, or check if you used a different Google account.");
-            }
-          }
-        } catch (error) {
-          console.error("Auth check failed", error);
-          setStatus("guest");
-          setCurrentUser(null);
-        }
-      } else {
-        // not logged in 
-        setStatus("guest");
-        setCurrentUser(null);
-      }
+      checkUserStatus(user);
     });
     return () => unsubscribe();
-  }, [hasCheckedStatus]); // Added dependency
+  }, [hasCheckedStatus, paymentSuccessDismissed]);
 
   // Handle manual status check
   const handleCheckStatus = async () => {
@@ -141,7 +192,7 @@ export function RegistrationSection() {
 
   // Add periodic status checking for pending users
   useEffect(() => {
-    if (status === "pending" && currentUser?.hasSubmitted) {
+    if ((status === "pending" || status === "approved") && currentUser?.hasSubmitted) {
       const interval = setInterval(async () => {
         try {
           const res = await fetch("/api/user-status", {
@@ -153,14 +204,27 @@ export function RegistrationSection() {
           const data = await res.json();
           if (data.status === true) {
             const actualStatus = data.actualStatus?.toLowerCase();
-            if (actualStatus === "accepted") {
-              setStatus("approved");
-              setCurrentUser((prev: any) => prev ? { ...prev, actualStatus: "accepted" } : null);
-              clearInterval(interval); // Stop checking once approved
-            } else if (actualStatus === "rejected") {
-              setStatus("guest");
-              setCurrentUser((prev: any) => prev ? { ...prev, hasSubmitted: false, actualStatus: "rejected" } : null);
-              clearInterval(interval); // Stop checking once rejected
+            const isPaid = data.isPaid === true;
+            const isEngineer = currentUser.major === "Engineering";
+
+            // Handle transition to payment_success from approved or pending
+            if (isPaid) {
+              setStatus("payment_success");
+              setCurrentUser((prev: any) => prev ? { ...prev, isPaid: true } : null);
+              clearInterval(interval);
+              return;
+            }
+
+            // For Healthcare: handle transition from pending to approved/rejected
+            if (!isEngineer && status === "pending") {
+              if (actualStatus === "accepted") {
+                setStatus("approved");
+                setCurrentUser((prev: any) => prev ? { ...prev, actualStatus: "accepted" } : null);
+              } else if (actualStatus === "rejected") {
+                setStatus("rejected");
+                setCurrentUser((prev: any) => prev ? { ...prev, actualStatus: "rejected" } : null);
+                clearInterval(interval); // Stop checking once rejected
+              }
             }
           }
         } catch (error) {
@@ -176,6 +240,45 @@ export function RegistrationSection() {
   const handlePayment = () => {
     // The actual payment handling is now done by the Ticket Tailor widget
     console.log('Payment handled by Ticket Tailor widget');
+  };
+
+  // Handle Domain Confirmation
+  const handleConfirmDomain = async () => {
+    if (!selectedDomain || !currentUser) return;
+
+    setIsUpdatingDomain(true);
+    setIsDomainConfirmed(true); // Hide grid immediately
+
+    try {
+      const idToken = await auth.currentUser?.getIdToken();
+      if (!idToken) throw new Error("Authentication token missing");
+
+      const res = await fetch("/api/user/update-domain", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          idToken,
+          domain: selectedDomain
+        }),
+      });
+
+      if (!res.ok) {
+        const errorData = await res.json();
+        throw new Error(errorData.error || "Failed to update domain");
+      }
+
+      // Success! Move to final phase after a short delay for visual confirmation
+      setTimeout(() => {
+        setStatus("final_phase");
+      }, 1500);
+
+    } catch (error: any) {
+      console.error("Domain update failed:", error);
+      alert("Failed to confirm domain: " + error.message);
+      setIsDomainConfirmed(false); // Show grid again if failed
+    } finally {
+      setIsUpdatingDomain(false);
+    }
   };
 
   // Handle logout
@@ -326,9 +429,9 @@ export function RegistrationSection() {
         )}
 
         {/* DEV ONLY: State Toggles to visualize the flow */}
-        <div className="mb-12 flex flex-wrap justify-center gap-4 p-4 rounded-lg bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 w-fit mx-auto">
+        {/* <div className="mb-12 flex flex-wrap justify-center gap-4 p-4 rounded-lg bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 w-fit mx-auto">
           <span className="text-xs font-mono uppercase text-zinc-500 self-center">Dev Preview:</span>
-          {(["guest", "pending", "approved"] as UserStatus[]).map((s) => (
+          {(["guest", "pending", "approved", "rejected"] as UserStatus[]).map((s) => (
             <button
               key={s}
               onClick={() => setStatus(s)}
@@ -371,10 +474,10 @@ export function RegistrationSection() {
             Domain Selection
           </button>
 
-          <div className="w-px h-6 bg-zinc-300 dark:bg-zinc-700 self-center mx-2" />
+          <div className="w-px h-6 bg-zinc-300 dark:bg-zinc-700 self-center mx-2" /> */}
 
-          {/* Domain AI Button */}
-          <button
+        {/* Domain AI Button */}
+        {/* <button
             onClick={() => setStatus("domain_ai")}
             className={`px-3 py-1 rounded text-xs font-medium transition-colors flex items-center gap-1 ${status === "domain_ai"
               ? "bg-gradient-to-r from-purple-600 to-pink-600 text-white"
@@ -383,7 +486,7 @@ export function RegistrationSection() {
           >
             <span>🧠</span> Domain AI
           </button>
-        </div>
+        </div> */}
 
         {/* 4. DOMAIN AI VIEW: Mock Admin Dashboard */}
         {status === "domain_ai" && (
@@ -757,7 +860,10 @@ export function RegistrationSection() {
 
             <div className="mx-auto max-w-4xl">
               {/* Custom Styled Form with built-in submit */}
-              <CustomApplicationForm onSubmitSuccess={() => setStatus("pending")} />
+              <CustomApplicationForm onSubmitSuccess={() => {
+                console.log("Form submitted successfully, triggering status check...");
+                checkUserStatus(auth.currentUser || currentUser);
+              }} />
             </div>
           </div>
         )}
@@ -846,6 +952,48 @@ export function RegistrationSection() {
           </div>
         )}
 
+        {/* 3.5 REJECTED VIEW: Ticket Tailor Widget with Rejection Message */}
+        {status === "rejected" && (
+          <div className="animate-in fade-in slide-in-from-bottom-4 duration-700">
+            <div className="mx-auto max-w-2xl text-center mb-16">
+              <div className="mb-6 flex justify-center">
+                <div className="h-20 w-20 rounded-full bg-red-100 dark:bg-red-900/30 flex items-center justify-center">
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-10 h-10 text-red-600 dark:text-red-500">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
+                  </svg>
+                </div>
+              </div>
+              <h2 className="text-4xl sm:text-6xl font-black tracking-[-0.05em] uppercase text-red-600 mb-4">
+                Application Update
+              </h2>
+              <p className="text-xl font-bold tracking-tight text-zinc-900 dark:text-white sm:text-2xl">
+                We're sorry, {currentUser?.displayName || 'Applicant'}.
+              </p>
+              <div className="mt-4 p-6 bg-red-50 dark:bg-red-900/10 border border-red-100 dark:border-red-900/30 rounded-2xl max-w-xl mx-auto">
+                <p className="text-lg font-medium text-red-800 dark:text-red-300">
+                  Your Application is Rejected
+                </p>
+                <p className="mt-2 text-sm text-red-700/80 dark:text-red-400/80 leading-relaxed">
+                  Application Rejected, but you can still get the ticket
+                </p>
+              </div>
+            </div>
+
+            <div className="mx-auto max-w-4xl bg-white rounded-3xl shadow-xl ring-1 ring-zinc-200 overflow-hidden">
+              <div className="bg-zinc-800 px-6 py-4 flex items-center justify-center">
+                <h3 className="text-white font-bold text-lg">GENERAL ATTENDANCE TICKET</h3>
+              </div>
+              <div className="p-8">
+                <TicketTailorWidget />
+              </div>
+            </div>
+
+            <div className="mt-8 text-center text-sm text-zinc-500 max-w-md mx-auto">
+              <p>Still want to participate? Grab a general ticket above.</p>
+            </div>
+          </div>
+        )}
+
         {/* 4. LOADING VIEW: Smooth Transition State */}
         {status === "loading" && (
           <div className="flex flex-col items-center justify-center py-32 animate-in fade-in zoom-in-95 duration-500">
@@ -880,154 +1028,200 @@ export function RegistrationSection() {
 
 
               {/* Domain Grid: Reworked for Premium Feel */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6 items-start">
-                {[
-                  {
-                    id: "A",
-                    title: "Medical Tools & Hardware",
-                    tagline: "Tangible Engineering",
-                    definition: "Focuses on physical devices, tactile surgical instruments, and wearable bio-hardware that interact directly with human physiology.",
-                    goal: "Develop tangible, high-precision physical prototypes.",
-                    examples: [
-                      { name: "Steady-Suture", desc: "Haptic-feedback needle holders." },
-                      { name: "Smart-IV Drip", desc: "Infrared air-bubble detection systems." },
-                      { name: "Hemo-Cool", desc: "Peltier-controlled thermal sample carriers." }
-                    ],
-                    icon: (
-                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z" />
-                      </svg>
-                    )
-                  },
-                  {
-                    id: "B",
-                    title: "Clinical Systems & Operations",
-                    tagline: "Systems Intelligence",
-                    definition: "Optimizing the logic and flow of healthcare environments through systems thinking and resource maximization.",
-                    goal: "Create functional models or process simulations.",
-                    examples: [
-                      { name: "ER Triage-Bot", desc: "Predictive patient flow logic." },
-                      { name: "Opti-Staff", desc: "Data-driven nurse roster optimization." },
-                      { name: "Asset-Track", desc: "RFID-based high-value asset tracking." }
-                    ],
-                    icon: (
-                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
-                      </svg>
-                    )
-                  },
-                  {
-                    id: "C",
-                    title: "Digital Health & AI",
-                    tagline: "Algorithmic Healthcare",
-                    definition: "Leveraging computer vision and machine learning to build diagnostic tools and remote monitoring platforms.",
-                    goal: "Build functional apps or diagnostic algorithms.",
-                    examples: [
-                      { name: "Derma-Scan AI", desc: "Vision-based lesion screening." },
-                      { name: "Vocal-Marker", desc: "Respiratory audio analysis AI." },
-                      { name: "Sync-Rehab", desc: "Motion-tracking physiotherapy apps." }
-                    ],
-                    icon: (
-                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-                      </svg>
-                    )
-                  }
-                ].map((domain) => (
-                  <div
-                    key={domain.id}
-                    onClick={() => setSelectedDomain(domain.id)}
-                    className={`group relative p-8 rounded-3xl border transition-all duration-500 cursor-pointer ${selectedDomain === domain.id
-                      ? "bg-zinc-50 dark:bg-[#007b8a]/5 border-[#007b8a] shadow-[0_0_40px_rgba(0,123,138,0.15)] ring-1 ring-[#007b8a]/20"
-                      : "bg-white dark:bg-black border-zinc-200 dark:border-zinc-800 hover:border-[#007b8a]/40"
-                      }`}
-                  >
-                    {/* Technical ID */}
-                    <div className="absolute top-6 right-8 font-mono text-[9px] font-black tracking-[0.2em] text-zinc-300 dark:text-zinc-700">
-                      SEC_ID: 0{domain.id === 'A' ? 1 : domain.id === 'B' ? 2 : 3}
-                    </div>
-
-                    {/* Icon & Category */}
-                    <div className="flex items-center gap-4 mb-8">
-                      <div className={`w-12 h-12 flex items-center justify-center rounded-2xl transition-all duration-500 ${selectedDomain === domain.id ? "bg-[#007b8a] text-white shadow-lg shadow-[#007b8a]/30 rotate-3" : "bg-zinc-100 dark:bg-zinc-900 text-[#007b8a]"}`}>
-                        {domain.icon}
+              {!isDomainConfirmed ? (
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 items-start">
+                  {[
+                    {
+                      id: "A",
+                      title: "Medical Tools & Hardware",
+                      tagline: "Tangible Engineering",
+                      definition: "Focuses on physical devices, tactile surgical instruments, and wearable bio-hardware that interact directly with human physiology.",
+                      goal: "Develop tangible, high-precision physical prototypes.",
+                      examples: [
+                        { name: "Steady-Suture", desc: "Haptic-feedback needle holders." },
+                        { name: "Smart-IV Drip", desc: "Infrared air-bubble detection systems." },
+                        { name: "Hemo-Cool", desc: "Peltier-controlled thermal sample carriers." }
+                      ],
+                      icon: (
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z" />
+                        </svg>
+                      )
+                    },
+                    {
+                      id: "B",
+                      title: "Clinical Systems & Operations",
+                      tagline: "Systems Intelligence",
+                      definition: "Optimizing the logic and flow of healthcare environments through systems thinking and resource maximization.",
+                      goal: "Create functional models or process simulations.",
+                      examples: [
+                        { name: "ER Triage-Bot", desc: "Predictive patient flow logic." },
+                        { name: "Opti-Staff", desc: "Data-driven nurse roster optimization." },
+                        { name: "Asset-Track", desc: "RFID-based high-value asset tracking." }
+                      ],
+                      icon: (
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+                        </svg>
+                      )
+                    },
+                    {
+                      id: "C",
+                      title: "Digital Health & AI",
+                      tagline: "Algorithmic Healthcare",
+                      definition: "Leveraging computer vision and machine learning to build diagnostic tools and remote monitoring platforms.",
+                      goal: "Build functional apps or diagnostic algorithms.",
+                      examples: [
+                        { name: "Derma-Scan AI", desc: "Vision-based lesion screening." },
+                        { name: "Vocal-Marker", desc: "Respiratory audio analysis AI." },
+                        { name: "Sync-Rehab", desc: "Motion-tracking physiotherapy apps." }
+                      ],
+                      icon: (
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                        </svg>
+                      )
+                    }
+                  ].map((domain) => (
+                    <div
+                      key={domain.id}
+                      onClick={() => setSelectedDomain(domain.id)}
+                      className={`group relative p-8 rounded-3xl border transition-all duration-500 cursor-pointer ${selectedDomain === domain.id
+                        ? "bg-zinc-50 dark:bg-[#007b8a]/5 border-[#007b8a] shadow-[0_0_40px_rgba(0,123,138,0.15)] ring-1 ring-[#007b8a]/20"
+                        : "bg-white dark:bg-black border-zinc-200 dark:border-zinc-800 hover:border-[#007b8a]/40"
+                        }`}
+                    >
+                      {/* Technical ID */}
+                      <div className="absolute top-6 right-8 font-mono text-[9px] font-black tracking-[0.2em] text-zinc-300 dark:text-zinc-700">
+                        SEC_ID: 0{domain.id === 'A' ? 1 : domain.id === 'B' ? 2 : 3}
                       </div>
-                      <div className="text-left">
-                        <span className="block text-[10px] font-black uppercase tracking-widest text-[#007b8a] mb-0.5">Domain {domain.id}</span>
-                        <span className="block text-xs font-medium text-zinc-400">{domain.tagline}</span>
+
+                      {/* Icon & Category */}
+                      <div className="flex items-center gap-4 mb-8">
+                        <div className={`w-12 h-12 flex items-center justify-center rounded-2xl transition-all duration-500 ${selectedDomain === domain.id ? "bg-[#007b8a] text-white shadow-lg shadow-[#007b8a]/30 rotate-3" : "bg-zinc-100 dark:bg-zinc-900 text-[#007b8a]"}`}>
+                          {domain.icon}
+                        </div>
+                        <div className="text-left">
+                          <span className="block text-[10px] font-black uppercase tracking-widest text-[#007b8a] mb-0.5">Domain {domain.id}</span>
+                          <span className="block text-xs font-medium text-zinc-400">{domain.tagline}</span>
+                        </div>
                       </div>
-                    </div>
 
-                    <h3 className="text-xl font-bold text-zinc-900 dark:text-white mb-4 text-left leading-tight group-hover:text-[#007b8a] transition-colors">
-                      {domain.title}
-                    </h3>
+                      <h3 className="text-xl font-bold text-zinc-900 dark:text-white mb-4 text-left leading-tight group-hover:text-[#007b8a] transition-colors">
+                        {domain.title}
+                      </h3>
 
-                    {/* Action Area */}
-                    <div className="flex items-center justify-between mt-auto">
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setExpandedDomain(expandedDomain === domain.id ? null : domain.id);
-                        }}
-                        className={`text-[10px] font-black uppercase tracking-widest px-4 py-2 rounded-full border transition-all ${expandedDomain === domain.id ? "bg-[#007b8a] border-[#007b8a] text-white" : "border-zinc-200 dark:border-zinc-800 text-zinc-500 dark:text-zinc-400 hover:border-[#007b8a] hover:text-[#007b8a]"}`}
-                      >
-                        {expandedDomain === domain.id ? "Close Brief" : "View Brief"}
-                      </button>
+                      {/* Action Area */}
+                      <div className="flex items-center justify-between mt-auto">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setExpandedDomain(expandedDomain === domain.id ? null : domain.id);
+                          }}
+                          className={`text-[10px] font-black uppercase tracking-widest px-4 py-2 rounded-full border transition-all ${expandedDomain === domain.id ? "bg-[#007b8a] border-[#007b8a] text-white" : "border-zinc-200 dark:border-zinc-800 text-zinc-500 dark:text-zinc-400 hover:border-[#007b8a] hover:text-[#007b8a]"}`}
+                        >
+                          {expandedDomain === domain.id ? "Close Brief" : "View Brief"}
+                        </button>
 
-                      {selectedDomain === domain.id && (
-                        <div className="flex items-center gap-2 animate-in fade-in zoom-in slide-in-from-right-2">
-                          <span className="text-[10px] font-black uppercase tracking-tighter text-[#007b8a]">Selected</span>
-                          <div className="w-2 h-2 rounded-full bg-[#007b8a] animate-pulse" />
-                        </div>
-                      )}
-                    </div>
+                        {selectedDomain === domain.id && (
+                          <div className="flex items-center gap-2 animate-in fade-in zoom-in slide-in-from-right-2">
+                            <span className="text-[10px] font-black uppercase tracking-tighter text-[#007b8a]">Selected</span>
+                            <div className="w-2 h-2 rounded-full bg-[#007b8a] animate-pulse" />
+                          </div>
+                        )}
+                      </div>
 
-                    {/* Precision Expansion Detail */}
-                    <div className={`overflow-hidden transition-all duration-700 ease-[cubic-bezier(0.2,0,0,1)] ${expandedDomain === domain.id ? "max-h-[800px] opacity-100 mt-8" : "max-h-0 opacity-0"}`}>
-                      <div className="pt-8 border-t border-zinc-100 dark:border-zinc-800/50 space-y-8 text-left">
+                      {/* Precision Expansion Detail */}
+                      <div className={`overflow-hidden transition-all duration-700 ease-[cubic-bezier(0.2,0,0,1)] ${expandedDomain === domain.id ? "max-h-[800px] opacity-100 mt-8" : "max-h-0 opacity-0"}`}>
+                        <div className="pt-8 border-t border-zinc-100 dark:border-zinc-800/50 space-y-8 text-left">
 
-                        <div>
-                          <label className="text-[9px] font-black uppercase tracking-[0.2em] text-[#007b8a] block mb-3">01. Tactical Scope</label>
-                          <p className="text-sm text-zinc-500 dark:text-zinc-400 leading-relaxed tabular-nums">
-                            {domain.definition}
-                          </p>
-                        </div>
+                          <div>
+                            <label className="text-[9px] font-black uppercase tracking-[0.2em] text-[#007b8a] block mb-3">01. Tactical Scope</label>
+                            <p className="text-sm text-zinc-500 dark:text-zinc-400 leading-relaxed tabular-nums">
+                              {domain.definition}
+                            </p>
+                          </div>
 
-                        <div>
-                          <label className="text-[9px] font-black uppercase tracking-[0.2em] text-[#007b8a] block mb-3">02. Mission Objective</label>
-                          <p className="text-[15px] font-bold text-zinc-900 dark:text-zinc-200 leading-snug">
-                            {domain.goal}
-                          </p>
-                        </div>
+                          <div>
+                            <label className="text-[9px] font-black uppercase tracking-[0.2em] text-[#007b8a] block mb-3">02. Mission Objective</label>
+                            <p className="text-[15px] font-bold text-zinc-900 dark:text-zinc-200 leading-snug">
+                              {domain.goal}
+                            </p>
+                          </div>
 
-                        <div>
-                          <label className="text-[9px] font-black uppercase tracking-[0.2em] text-[#007b8a] block mb-4">03. Project Precedents</label>
-                          <div className="space-y-4">
-                            {domain.examples.map((ex, i) => (
-                              <div key={i} className="group/item bg-zinc-50 dark:bg-white/5 p-4 rounded-xl border border-transparent hover:border-[#007b8a]/20 transition-all">
-                                <span className="text-sm font-bold text-zinc-900 dark:text-zinc-100 block mb-1">{ex.name}</span>
-                                <span className="text-[11px] text-zinc-400 leading-tight block">{ex.desc}</span>
-                              </div>
-                            ))}
+                          <div>
+                            <label className="text-[9px] font-black uppercase tracking-[0.2em] text-[#007b8a] block mb-4">03. Project Precedents</label>
+                            <div className="space-y-4">
+                              {domain.examples.map((ex, i) => (
+                                <div key={i} className="group/item bg-zinc-50 dark:bg-white/5 p-4 rounded-xl border border-transparent hover:border-[#007b8a]/20 transition-all">
+                                  <span className="text-sm font-bold text-zinc-900 dark:text-zinc-100 block mb-1">{ex.name}</span>
+                                  <span className="text-[11px] text-zinc-400 leading-tight block">{ex.desc}</span>
+                                </div>
+                              ))}
+                            </div>
                           </div>
                         </div>
                       </div>
                     </div>
+                  ))}
+                </div>
+              ) : (
+                /* Confirmed State View */
+                <div className="max-w-md mx-auto animate-in fade-in zoom-in duration-500">
+                  <div className="p-8 rounded-3xl border border-[#007b8a] bg-zinc-50 dark:bg-[#007b8a]/5 shadow-xl relative overflow-hidden">
+                    <div className="absolute top-0 right-0 p-4">
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] font-black uppercase tracking-widest text-[#007b8a]">Confirmed</span>
+                        <div className="w-2 h-2 rounded-full bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)]" />
+                      </div>
+                    </div>
+
+                    <div className="w-16 h-16 bg-[#007b8a] text-white flex items-center justify-center rounded-2xl shadow-lg mb-6 mx-auto">
+                      {selectedDomain === "A" && (
+                        <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z" />
+                        </svg>
+                      )}
+                      {selectedDomain === "B" && (
+                        <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+                        </svg>
+                      )}
+                      {selectedDomain === "C" && (
+                        <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                        </svg>
+                      )}
+                    </div>
+
+                    <h3 className="text-2xl font-bold text-zinc-900 dark:text-white mb-2 leading-tight uppercase tracking-tight">
+                      {selectedDomain === "A" ? "Medical Tools & Hardware" :
+                        selectedDomain === "B" ? "Clinical Systems & Operations" :
+                          "Digital Health & AI"}
+                    </h3>
+                    <p className="text-zinc-500 dark:text-zinc-400 font-medium">Domain {selectedDomain} Selected</p>
+
+                    {isUpdatingDomain && (
+                      <div className="mt-6 flex flex-col items-center gap-3">
+                        <div className="w-8 h-8 border-3 border-[#007b8a]/30 border-t-[#007b8a] rounded-full animate-spin" />
+                        <span className="text-[10px] font-black uppercase tracking-widest text-[#007b8a]">Updating mission files...</span>
+                      </div>
+                    )}
                   </div>
-                ))}
-              </div>
+                </div>
+              )}
 
               {/* Action Buttons */}
               <div className="mt-20 flex flex-col items-center gap-6">
                 <button
-                  disabled={!selectedDomain}
-                  onClick={() => setStatus("payment_success")}
-                  className={`px-12 py-3 rounded-full font-bold transition-all text-sm uppercase tracking-widest shadow-lg ${selectedDomain
+                  disabled={!selectedDomain || isUpdatingDomain}
+                  onClick={handleConfirmDomain}
+                  className={`px-12 py-3 rounded-full font-bold transition-all text-sm uppercase tracking-widest shadow-lg ${selectedDomain && !isUpdatingDomain
                     ? "bg-[#007b8a] text-white hover:bg-[#00606b] hover:scale-105 active:scale-95 shadow-[#007b8a]/20"
                     : "bg-zinc-100 dark:bg-zinc-800 text-zinc-400 cursor-not-allowed"
                     }`}
                 >
-                  Confirm Domain
+                  {isUpdatingDomain ? "Verifying..." : "Confirm Domain"}
                 </button>
                 <p className="text-xs text-zinc-400 flex items-center gap-2">
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1061,9 +1255,21 @@ export function RegistrationSection() {
               <p className="text-xl font-bold tracking-tight text-zinc-900 dark:text-white sm:text-2xl mb-2">
                 Your spot is secured!
               </p>
-              <p className="text-lg text-zinc-600 dark:text-zinc-400 max-w-md mx-auto">
+              <p className="text-lg text-zinc-600 dark:text-zinc-400 max-w-md mx-auto mb-8">
                 Your payment was processed successfully. We&apos;ve sent a confirmation email with your ticket details.
               </p>
+
+              <Button
+                onClick={() => {
+                  const isEngineer = currentUser?.major === "Engineering";
+                  localStorage.setItem("medhack_payment_confirmed", "true");
+                  setPaymentSuccessDismissed(true);
+                  setStatus(isEngineer ? "final_phase" : "domain_selection");
+                }}
+                className="bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-12 rounded-full shadow-lg transition-all hover:scale-105"
+              >
+                {currentUser?.major === "Engineering" ? "Go to Final Phase" : "Select Your Domain"}
+              </Button>
             </div>
           </div>
         )}

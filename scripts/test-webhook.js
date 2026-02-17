@@ -53,7 +53,7 @@ const signature = crypto
     .update(timestamp + body)
     .digest('hex');
 
-const headerValue = `t=${timestamp},s=${signature}`;
+const headerValue = `t=${timestamp},v1=${signature}`;
 
 console.log(`Sending webhook to ${URL}...`);
 console.log(`Email: ${EMAIL_TO_TEST}`);

@@ -4,27 +4,19 @@ import crypto from "crypto";
 
 export async function POST(req: NextRequest) {
     try {
-        const bodyText = await req.text(); // Read raw body for signature verification
-        let body;
-        try {
-            body = JSON.parse(bodyText);
-        } catch (e) {
-            return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
-        }
+        const bodyText = await req.text();
 
-        // --- Signature Verification ---
+        // --- 1. Signature Verification ---
         const signatureHeader = req.headers.get("Tickettailor-Webhook-Signature");
         const webhookSecret = process.env.TICKET_TAILOR_WEBHOOK_SECRET;
 
-        // Skip verification ONLY if specifically allowed in dev/test (optional, but good for local dev without secrets)
-        // But per request, we are securing it.
         if (webhookSecret) {
             if (!signatureHeader) {
+                console.error("[Webhook] Error: Missing signature header");
                 return NextResponse.json({ error: "Missing signature header" }, { status: 401 });
             }
 
-            // Header format: t=1234567890,v1=... (Ticket Tailor uses t=... and s=...)
-            // Actually Ticket Tailor format is: t=timestamp,s=signature
+            // Header format: t=timestamp,s=signature (or v1=signature)
             const parts = signatureHeader.split(",");
             let timestamp = "";
             let signature = "";
@@ -32,145 +24,149 @@ export async function POST(req: NextRequest) {
             parts.forEach(part => {
                 const [key, value] = part.split("=");
                 if (key === "t") timestamp = value;
-                if (key === "s") signature = value;
+                if (key === "s" || key === "v1") signature = value;
             });
 
             if (!timestamp || !signature) {
+                console.error("[Webhook] Error: Invalid signature header format", signatureHeader);
                 return NextResponse.json({ error: "Invalid signature header format" }, { status: 401 });
             }
 
-            // Verify timestamp to prevent replay attacks (e.g., 5 minute tolerance)
             const requestTime = parseInt(timestamp, 10);
             const now = Math.floor(Date.now() / 1000);
+
+            // Log for debugging
+            console.log(`[Webhook] Verifying signature. Timestamp: ${requestTime}, Now: ${now}`);
+
             if (isNaN(requestTime) || now - requestTime > 300) {
+                // Relaxed check for dev/testing replay if needed, but keeping standard 5m here
+                console.error("[Webhook] Error: Request timestamp too old");
                 return NextResponse.json({ error: "Request timestamp too old" }, { status: 401 });
             }
 
-            // Create valid signature
-            // The signature is an HMAC-SHA256 of the timestamp + the request body
             const payloadToSign = timestamp + bodyText;
             const expectedSignature = crypto
                 .createHmac("sha256", webhookSecret)
                 .update(payloadToSign)
                 .digest("hex");
 
-            // Constant time comparison to prevent timing attacks
+            // Timing safe comparison
             const isValid = crypto.timingSafeEqual(
                 Buffer.from(signature),
                 Buffer.from(expectedSignature)
             );
 
             if (!isValid) {
-                console.warn("Invalid webhook signature attempt");
+                console.error(`[Webhook] Error: Invalid signature.`);
+                console.error(`Received: ${signature}`);
+                console.error(`Expected: ${expectedSignature}`);
+                console.error(`Secret (first 4): ${webhookSecret.substring(0, 4)}...`);
                 return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
             }
         } else {
-            console.warn("TICKET_TAILOR_WEBHOOK_SECRET is not set. Skipping signature verification (INSECURE).");
+            console.warn("[Webhook] Warning: TICKET_TAILOR_WEBHOOK_SECRET not set. Skipping verification.");
         }
-        // -----------------------------
 
-        // 1. Verify it's a successful order event
-        // User requested order.created, standard is often order.completed for payment, but we will accept both or just created as requested.
-        if (body.event !== "order.created" && body.event !== "order.completed") {
+        // --- 2. Parse Body ---
+        let body;
+        try {
+            body = JSON.parse(bodyText);
+        } catch (e) {
+            return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+        }
+
+        const eventType = (body.event || "").toLowerCase();
+        console.log(`[Webhook] Normalized event: ${eventType} (from: ${body.event})`);
+
+        if (eventType !== "order.created" && eventType !== "order.completed") {
+            console.log(`[Webhook] Ignoring event: ${eventType}`);
             return NextResponse.json({ message: "Ignored event" }, { status: 200 });
         }
 
-        const order = body.payload;
-        // TicketTailor stores the email of the person who bought the ticket
-        const customerEmail = order.email ? order.email.toLowerCase() : null;
+        const order = body.payload || {};
+        // Ticket Tailor stores the email in buyer_details.email for orders
+        const customerEmail = (order.buyer_details?.email || order.email)?.toLowerCase();
 
         if (!customerEmail) {
+            console.error(`[Webhook] Error: No email found in payload. Payload keys: ${Object.keys(order).join(", ")}`);
+            console.log(`[Webhook] Full Payload:`, JSON.stringify(order, null, 2));
             return NextResponse.json({ error: "No email in payload" }, { status: 400 });
         }
 
-        console.log(`Webhook received for ${customerEmail}. Event: ${body.event}`);
+        console.log(`[Webhook] Processing order ${order.id} for: ${customerEmail}`);
 
+        // --- 3. Find User ---
         const results = new Map(); // Map<docId, DocumentSnapshot>
 
-        // 2. Strategy A: Find user by Auth Email (Preferred)
+        // A. Try Auth Lookup (Reliable)
         try {
             const userRecord = await adminAuth.getUserByEmail(customerEmail);
-            console.log(`Found user in Auth: ${userRecord.uid}`);
+            console.log(`[Webhook] Found Auth User UID: ${userRecord.uid}`);
 
-            // Check if document exists with this UID in 'attendees'
+            // Check existence in both collections
             const attendeeDoc = await adminDb.collection("attendees").doc(userRecord.uid).get();
-            if (attendeeDoc.exists) {
-                results.set(attendeeDoc.id, attendeeDoc);
-            }
+            if (attendeeDoc.exists) results.set(attendeeDoc.id, attendeeDoc);
 
-            // Check if document exists with this UID in 'competitors'
             const competitorDoc = await adminDb.collection("competitors").doc(userRecord.uid).get();
-            if (competitorDoc.exists) {
-                results.set(competitorDoc.id, competitorDoc);
+            if (competitorDoc.exists) results.set(competitorDoc.id, competitorDoc);
+
+        } catch (e) {
+            console.log(`[Webhook] User not found in Auth by email ${customerEmail}.`);
+        }
+
+        // B. Fallback: Search Collections directly (Reliable for mismatches)
+        // We do this if no results from Auth, OR just to be safe and find any doc with this email.
+        if (results.size === 0) {
+            console.log(`[Webhook] Searching collections for ${customerEmail}...`);
+            const collections = ["attendees", "competitors"];
+
+            for (const col of collections) {
+                // Search primary email
+                const q1 = await adminDb.collection(col).where("email", "==", customerEmail).get();
+                q1.forEach(doc => results.set(doc.id, doc));
+
+                // Search university email
+                const q2 = await adminDb.collection(col).where("university_email", "==", customerEmail).get();
+                q2.forEach(doc => results.set(doc.id, doc));
             }
-
-        } catch (authError) {
-            console.log(`User not found in Auth by email ${customerEmail}. Proceeding to fallback search.`);
         }
 
         if (results.size === 0) {
-            const queries = [
-                adminDb.collection("attendees").where("email", "==", customerEmail).get(),
-                adminDb.collection("attendees").where("university_email", "==", customerEmail).get(),
-                adminDb.collection("competitors").where("email", "==", customerEmail).get(),
-                adminDb.collection("competitors").where("university_email", "==", customerEmail).get()
-            ];
-
-            const querySnapshots = await Promise.all(queries);
-
-            // Deduplicate docs found (in case email and university_email are the same or point to same doc)
-            querySnapshots.forEach(snap => {
-                snap.docs.forEach(doc => {
-                    if (!results.has(doc.id)) {
-                        results.set(doc.id, doc);
-                    }
-                });
-            });
-        }
-
-        // If no user found, return 200 to prevent retries
-        if (results.size === 0) {
-            console.warn(`No user found for email: ${customerEmail} (checked Auth and Collections)`);
+            console.warn(`[Webhook] User NOT found for email: ${customerEmail}`);
             return NextResponse.json({ message: "User not found" }, { status: 200 });
         }
 
-        // 4. Update payment status
+        // --- 4. Update Docs ---
+        console.log(`[Webhook] Found ${results.size} document(s) to update.`);
+
         const batch = adminDb.batch();
-        const timestamp = new Date().toISOString();
+        const now = new Date().toISOString();
 
         results.forEach((doc) => {
-            // Determine collection to decide on fields? 
-            // Actually, both attendees and competitors use 'isPayed'.
-            // We can check doc.ref.parent.id to know which collection it is if needed, 
-            // but here the update logic is uniform enough for 'isPayed'.
-
-            const collectionName = doc.ref.parent.id;
-            console.log(`Updating ${collectionName} doc ${doc.id} payment status.`);
+            const colName = doc.ref.parent.id;
 
             const updateData: any = {
-                isPayed: true,
-                paymentDate: timestamp,
-                ticketId: order.id,
-                updatedAt: timestamp
+                isPaid: true,
+                paymentDate: now,
+                updatedAt: now,
+                ticketId: order.id
             };
 
-            if (collectionName === "attendees") {
-                updateData.isPayed = true; // Legacy field for attendees,
-                updateData.paymentDate = timestamp,
-                    updateData.ticketId = order.id,
-                    updateData.updatedAt = timestamp
+            if (colName === "attendees") {
+                updateData.isPaid = true;
             }
-            // Competitors don't get auto-approved status change, just payment.
 
+            console.log(`[Webhook] Updating ${colName}/${doc.id}`, updateData);
             batch.update(doc.ref, updateData);
         });
 
         await batch.commit();
-        console.log(`Successfully updated payment for ${customerEmail}`);
+        console.log("[Webhook] Update passed to Firestore.");
 
-        return NextResponse.json({ success: true });
-    } catch (error) {
-        console.error("Webhook Error:", error);
+        return NextResponse.json({ success: true, updated: results.size });
+
+    } catch (error: any) {
+        console.error("[Webhook] Internal Error:", error);
         return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
     }
 }
