@@ -885,7 +885,7 @@ export function RegistrationSection() {
               <CustomApplicationForm onSubmitSuccess={() => {
                 console.log("Form submitted successfully, triggering status check...");
 
-                // Set pending status immediately
+                // Set loading status immediately
                 setStatus("loading");
 
                 // Then check status after Firebase write completes

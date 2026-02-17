@@ -1486,7 +1486,7 @@ export function CustomApplicationForm({ onSubmitSuccess }: CustomApplicationForm
                     </div>
 
                     {/* Quick Test Actions - Visible in both Dev and Prod - COMMENTED FOR PRODUCTION*/}
-                    <div className="shrink-0 flex gap-2 self-start">
+                    {/* <div className="shrink-0 flex gap-2 self-start">
                         <div className="flex flex-col gap-2">
                             <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest text-center">Quick Fill</span>
                             <div className="flex gap-2">
@@ -1522,7 +1522,7 @@ export function CustomApplicationForm({ onSubmitSuccess }: CustomApplicationForm
                                 </button>
                             </div>
                         </div>
-                    </div>
+                    </div> */}
 
 
                     {/* Type Toggle - Segmented Control */}
