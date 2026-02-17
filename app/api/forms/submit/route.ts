@@ -24,20 +24,6 @@ export async function POST(req: NextRequest) {
     try {
         logger.info('Form submission attempt', { requestId });
 
-        // 0. Rate limiting check (DISABLED FOR DEVELOPMENT)
-        // const rateLimit = rateLimitMiddleware(req);
-        // if (!rateLimit.success) {
-        //     logRateLimit('client', rateLimit.error || 'Unknown rate limit error');
-        //     return NextResponse.json(
-        //         {
-        //             error: "Too many requests. Please try again later.",
-        //             code: "RATE_LIMITED",
-        //             retryAfter: rateLimit.retryAfter
-        //         },
-        //         { status: 429 }
-        //     );
-        // }
-
         const body = await req.json();
         const { responses, type = "competitor", idToken } = body;
         formType = type;
@@ -49,6 +35,7 @@ export async function POST(req: NextRequest) {
         }
 
         try {
+            console.log("Beginning submission to firebase and sheets ID Token: ", idToken);
             // Verify token and check for revocation (true) 
             // If the user's account is disabled or their password is changed, the token will be revoked
             decodedToken = await adminAuth.verifyIdToken(idToken, true);

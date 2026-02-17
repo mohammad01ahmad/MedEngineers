@@ -639,13 +639,16 @@ export function CustomApplicationForm({ onSubmitSuccess }: CustomApplicationForm
             return;
         }
 
+        console.log("Submission to firebase starts here");
         setSubmitting(true);
         setError(null);
 
         // Debug
+        console.log("Submission to firebase starts here 2");
         console.log("Submitting Payload Maps:", submissionPayload);
 
         try {
+            console.log("Form submission started");
             const res = await fetch("/api/forms/submit", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
