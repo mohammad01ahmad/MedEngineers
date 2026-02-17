@@ -79,24 +79,24 @@ export function CustomApplicationForm({ onSubmitSuccess }: CustomApplicationForm
             showFor: "Engineering"
         },
 
-        // ============ MEDICINE SECTIONS ============
-        // Use a Medicine-specific question as key (the second "What is your major?" has same label, so we use the next unique question)
+        // ============ MEDICINE/HEALTHCARE SECTIONS ============
+        // Use a Medicine-specific question as key
         "If you were in a Hackathon team right now, which of these is your strongest asset?": {
             title: "Skillset",
             description: "",
-            showFor: "Medicine"
+            showFor: "Healthcare"
         },
         "LinkedIn Profile URL (Optional)": {
             title: "Experience & Portfolio",
             description: "",
-            showFor: "Medicine"
+            showFor: "Healthcare"
         },
         "The Clinical Efficiency Challenge": {
             title: "The \"Smartness\" Test (Critical Thinking)",
             description: "Choose one of these scenarios to test their ability to apply medical knowledge to innovation.",
-            showFor: "Medicine"
+            showFor: "Healthcare"
         },
-        // "The Why" is Medicine-only (has healthcare-specific description), no common ending section
+        // "The Why" is valid for Healthcare too
     };
 
     // Skip logic configuration: question ranges for each major (1-indexed)
@@ -105,7 +105,8 @@ export function CustomApplicationForm({ onSubmitSuccess }: CustomApplicationForm
     // NOTE: These indices assume SECTIONS HAVE BEEN REMOVED from Google Forms
     const SKIP_LOGIC: Record<string, { start: number; end: number | null }> = {
         "Engineering": { start: 7, end: 19 },   // Items 7-18 (Engineering-only questions)
-        "Medicine": { start: 19, end: null },   // Items 19+ (Medicine-only questions)
+        "Medicine": { start: 19, end: null },   // Items 19+ (Medicine-only questions) - Maintain legacy support
+        "Healthcare": { start: 19, end: null }, // Items 19+ (Healthcare questions)
     };
 
     // No common ending - both tracks have their own final questions
@@ -116,7 +117,7 @@ export function CustomApplicationForm({ onSubmitSuccess }: CustomApplicationForm
     const MAJOR_QUESTION_KEYWORDS = ["what major are you in", "what is your major and year of study", "what field are you in"];
 
     // ===== TEST DATA GENERATOR =====
-    const fillTestData = (targetMajor: "Engineering" | "Medicine") => {
+    const fillTestData = (targetMajor: "Engineering" | "Healthcare") => {
         if (!formData) return;
 
         // Force major update so visibility logic is correct for the loop
@@ -166,7 +167,7 @@ export function CustomApplicationForm({ onSubmitSuccess }: CustomApplicationForm
 
             // Handle major question itself first
             if (MAJOR_QUESTION_KEYWORDS.some(kw => q.label.toLowerCase().includes(kw))) {
-                newResponses[q.id] = targetMajor;
+                newResponses[q.id] = targetMajor; // "Engineering" or "Healthcare"
                 return;
             }
 
@@ -280,6 +281,7 @@ export function CustomApplicationForm({ onSubmitSuccess }: CustomApplicationForm
 
         if (currentFormType === "competitor") {
             // Default to true for competitors, UNLESS explicitly set to false (e.g. Toolkit questions)
+            // Medicine/Healthcare questions are technically required if visible, which validateQuestion doesn't know about visibility
             if (question.required !== false) {
                 isRequired = true;
             }
@@ -1497,8 +1499,8 @@ export function CustomApplicationForm({ onSubmitSuccess }: CustomApplicationForm
                                     <span className="ml-1.5 text-xs font-bold uppercase">ENG</span>
                                 </button>
                                 <button
-                                    onClick={() => fillTestData("Medicine")}
-                                    title="Fill with Medicine data"
+                                    onClick={() => fillTestData("Healthcare")}
+                                    title="Fill with Healthcare data"
                                     className="p-2 rounded-lg bg-rose-50 dark:bg-rose-900/30 text-rose-600 dark:text-rose-400 hover:bg-rose-100 dark:hover:bg-rose-900/50 border border-rose-200 dark:border-rose-800 transition-all flex items-center justify-center"
                                 >
                                     <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">

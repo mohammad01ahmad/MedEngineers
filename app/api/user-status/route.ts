@@ -18,7 +18,8 @@ export async function POST(req: NextRequest) {
                 return NextResponse.json({
                     status: true,
                     type: "attendee",
-                    actualStatus: userData.status || "pending"
+                    actualStatus: userData.status || "pending",
+                    isPaid: userData.isPaid || userData.isPayed || false
                 }, { status: 200 });
             }
         }
@@ -31,7 +32,8 @@ export async function POST(req: NextRequest) {
                 return NextResponse.json({
                     status: true,
                     type: "competitor",
-                    actualStatus: competitorData.status || "pending"
+                    actualStatus: competitorData.status || "pending",
+                    isPaid: competitorData.isPaid || competitorData.isPayed || false
                 }, { status: 200 });
             }
         }

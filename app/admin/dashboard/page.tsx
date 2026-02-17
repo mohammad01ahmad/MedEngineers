@@ -9,7 +9,7 @@ export const revalidate = 0;
 
 async function getMedicineCompetitors(): Promise<Competitor[]> {
     const competitorsRef = adminDb.collection("competitors");
-    const snapshot = await competitorsRef.where("major", "==", "Medicine").get();
+    const snapshot = await competitorsRef.where("major", "in", ["Medicine", "Healthcare"]).get();
 
     // Cast the data to Competitor
     return snapshot.docs.map(doc => {

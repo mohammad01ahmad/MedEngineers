@@ -8,7 +8,7 @@ import { auth } from "@/lib/Firebase";
 import { Button } from "@/components/ui/button";
 import { retrieveFormData, hasValidStoredData, clearStoredData } from "@/lib/secureStorage";
 
-type UserStatus = "guest" | "pending" | "approved" | "loading" | "domain_ai" | "payment_success" | "final_phase" | "domain_selection";
+type UserStatus = "guest" | "pending" | "approved" | "rejected" | "loading" | "domain_ai" | "payment_success" | "final_phase" | "domain_selection";
 
 // Domain recommendation types
 interface DomainScore {
@@ -77,10 +77,12 @@ export function RegistrationSection() {
 
             clearStoredData();
 
-            if (actualStatus === "accepted") {
+            if (data.isPaid === true) {
+              setStatus("payment_success");
+            } else if (actualStatus === "accepted") {
               setStatus("approved");
             } else if (actualStatus === "rejected") {
-              setStatus("guest"); // Or you could add a "rejected" state
+              setStatus("rejected");
             } else {
               setStatus("pending")
             }
@@ -90,7 +92,8 @@ export function RegistrationSection() {
               ...user,
               hasSubmitted: true,
               submissionType: data.type,
-              actualStatus: actualStatus
+              actualStatus: actualStatus,
+              isPaid: data.isPaid
             });
 
           } else {
@@ -141,7 +144,7 @@ export function RegistrationSection() {
 
   // Add periodic status checking for pending users
   useEffect(() => {
-    if (status === "pending" && currentUser?.hasSubmitted) {
+    if ((status === "pending" || status === "approved") && currentUser?.hasSubmitted) {
       const interval = setInterval(async () => {
         try {
           const res = await fetch("/api/user-status", {
@@ -153,13 +156,23 @@ export function RegistrationSection() {
           const data = await res.json();
           if (data.status === true) {
             const actualStatus = data.actualStatus?.toLowerCase();
-            if (actualStatus === "accepted") {
+            const isPaid = data.isPaid === true;
+
+            // Handle transition to payment_success from approved or pending
+            if (isPaid) {
+              setStatus("payment_success");
+              setCurrentUser((prev: any) => prev ? { ...prev, isPaid: true } : null);
+              clearInterval(interval);
+              return;
+            }
+
+            if (actualStatus === "accepted" && status === "pending") {
               setStatus("approved");
               setCurrentUser((prev: any) => prev ? { ...prev, actualStatus: "accepted" } : null);
-              clearInterval(interval); // Stop checking once approved
+              // Don't clear interval yet, as they still need to pay
             } else if (actualStatus === "rejected") {
-              setStatus("guest");
-              setCurrentUser((prev: any) => prev ? { ...prev, hasSubmitted: false, actualStatus: "rejected" } : null);
+              setStatus("rejected");
+              setCurrentUser((prev: any) => prev ? { ...prev, actualStatus: "rejected" } : null);
               clearInterval(interval); // Stop checking once rejected
             }
           }
@@ -328,7 +341,7 @@ export function RegistrationSection() {
         {/* DEV ONLY: State Toggles to visualize the flow */}
         <div className="mb-12 flex flex-wrap justify-center gap-4 p-4 rounded-lg bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 w-fit mx-auto">
           <span className="text-xs font-mono uppercase text-zinc-500 self-center">Dev Preview:</span>
-          {(["guest", "pending", "approved"] as UserStatus[]).map((s) => (
+          {(["guest", "pending", "approved", "rejected"] as UserStatus[]).map((s) => (
             <button
               key={s}
               onClick={() => setStatus(s)}
@@ -842,6 +855,48 @@ export function RegistrationSection() {
 
             <div className="mt-8 text-center text-sm text-zinc-500 max-w-md mx-auto">
               <p>Having trouble with the widget? <a href="https://www.tickettailor.com/events/medhack/1154817" target="_blank" rel="noopener noreferrer" className="text-[#007b8a] hover:underline">Click here to open booking page directly</a></p>
+            </div>
+          </div>
+        )}
+
+        {/* 3.5 REJECTED VIEW: Ticket Tailor Widget with Rejection Message */}
+        {status === "rejected" && (
+          <div className="animate-in fade-in slide-in-from-bottom-4 duration-700">
+            <div className="mx-auto max-w-2xl text-center mb-16">
+              <div className="mb-6 flex justify-center">
+                <div className="h-20 w-20 rounded-full bg-red-100 dark:bg-red-900/30 flex items-center justify-center">
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-10 h-10 text-red-600 dark:text-red-500">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
+                  </svg>
+                </div>
+              </div>
+              <h2 className="text-4xl sm:text-6xl font-black tracking-[-0.05em] uppercase text-red-600 mb-4">
+                Application Update
+              </h2>
+              <p className="text-xl font-bold tracking-tight text-zinc-900 dark:text-white sm:text-2xl">
+                We're sorry, {currentUser?.displayName || 'Applicant'}.
+              </p>
+              <div className="mt-4 p-6 bg-red-50 dark:bg-red-900/10 border border-red-100 dark:border-red-900/30 rounded-2xl max-w-xl mx-auto">
+                <p className="text-lg font-medium text-red-800 dark:text-red-300">
+                  Your Application is Rejected
+                </p>
+                <p className="mt-2 text-sm text-red-700/80 dark:text-red-400/80 leading-relaxed">
+                  Polite Message, idk, Khalid your expertise is needed 🙏🙏🙏🙏🙏
+                </p>
+              </div>
+            </div>
+
+            <div className="mx-auto max-w-4xl bg-white rounded-3xl shadow-xl ring-1 ring-zinc-200 overflow-hidden">
+              <div className="bg-zinc-800 px-6 py-4 flex items-center justify-center">
+                <h3 className="text-white font-bold text-lg">GENERAL ATTENDANCE TICKET</h3>
+              </div>
+              <div className="p-8">
+                <TicketTailorWidget />
+              </div>
+            </div>
+
+            <div className="mt-8 text-center text-sm text-zinc-500 max-w-md mx-auto">
+              <p>Still want to participate? Grab a general ticket above.</p>
             </div>
           </div>
         )}
