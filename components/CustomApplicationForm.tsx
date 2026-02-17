@@ -1430,27 +1430,27 @@ export function CustomApplicationForm({ onSubmitSuccess }: CustomApplicationForm
         );
     }
 
-    // Success state
-    if (success) {
-        return (
-            <div className="rounded-3xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-xl overflow-hidden">
-                <div className="bg-gradient-to-r from-green-600 to-emerald-600 px-8 py-10 text-center">
-                    <div className="mx-auto w-16 h-16 bg-white/20 rounded-full flex items-center justify-center mb-4">
-                        <svg className="w-8 h-8 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                        </svg>
-                    </div>
-                    <h3 className="text-2xl font-bold text-white">Application Submitted!</h3>
-                    <p className="mt-2 text-green-100">Thank you for applying. We'll review your submission and get back to you soon.</p>
-                </div>
-                <div className="p-8 text-center">
-                    <p className="text-zinc-600 dark:text-zinc-400">
-                        A confirmation has been sent to your email.
-                    </p>
-                </div>
-            </div>
-        );
-    }
+    // Success state - COMMENTED FOR PRODUCTION
+    // if (success) {
+    //     return (
+    //         <div className="rounded-3xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-xl overflow-hidden">
+    //             <div className="bg-gradient-to-r from-green-600 to-emerald-600 px-8 py-10 text-center">
+    //                 <div className="mx-auto w-16 h-16 bg-white/20 rounded-full flex items-center justify-center mb-4">
+    //                     <svg className="w-8 h-8 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+    //                         <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+    //                     </svg>
+    //                 </div>
+    //                 <h3 className="text-2xl font-bold text-white">Application Submitted!</h3>
+    //                 <p className="mt-2 text-green-100">Thank you for applying. We'll review your submission and get back to you soon.</p>
+    //             </div>
+    //             <div className="p-8 text-center">
+    //                 <p className="text-zinc-600 dark:text-zinc-400">
+    //                     A confirmation has been sent to your email.
+    //                 </p>
+    //             </div>
+    //         </div>
+    //     );
+    // }
 
     return (
         <div className="rounded-3xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-xl overflow-hidden">
@@ -1482,7 +1482,7 @@ export function CustomApplicationForm({ onSubmitSuccess }: CustomApplicationForm
 
                     </div>
 
-                    {/* Quick Test Actions - Visible in both Dev and Prod */}
+                    {/* Quick Test Actions - Visible in both Dev and Prod - COMMENTED FOR PRODUCTION*/}
                     <div className="shrink-0 flex gap-2 self-start">
                         <div className="flex flex-col gap-2">
                             <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest text-center">Quick Fill</span>

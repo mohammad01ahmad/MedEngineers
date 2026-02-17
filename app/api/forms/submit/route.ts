@@ -25,20 +25,18 @@ export async function POST(req: NextRequest) {
         logger.info('Form submission attempt', { requestId });
 
         // 0. Rate limiting check (DISABLED FOR DEVELOPMENT)
-        /*
-        const rateLimit = rateLimitMiddleware(req);
-        if (!rateLimit.success) {
-            logRateLimit('client', rateLimit.error || 'Unknown rate limit error');
-            return NextResponse.json(
-                { 
-                    error: "Too many requests. Please try again later.",
-                    code: "RATE_LIMITED",
-                    retryAfter: rateLimit.retryAfter 
-                },
-                { status: 429 }
-            );
-        }
-        */
+        // const rateLimit = rateLimitMiddleware(req);
+        // if (!rateLimit.success) {
+        //     logRateLimit('client', rateLimit.error || 'Unknown rate limit error');
+        //     return NextResponse.json(
+        //         {
+        //             error: "Too many requests. Please try again later.",
+        //             code: "RATE_LIMITED",
+        //             retryAfter: rateLimit.retryAfter
+        //         },
+        //         { status: 429 }
+        //     );
+        // }
 
         const body = await req.json();
         const { responses, type = "competitor", idToken } = body;

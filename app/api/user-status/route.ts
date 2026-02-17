@@ -19,7 +19,8 @@ export async function POST(req: NextRequest) {
                     status: true,
                     type: "attendee",
                     actualStatus: userData.status || "pending",
-                    isPaid: userData.isPaid || userData.isPayed || false
+                    isPaid: userData.isPaid || userData.isPayed || false,
+                    major: userData.major || ""
                 }, { status: 200 });
             }
         }
@@ -33,7 +34,8 @@ export async function POST(req: NextRequest) {
                     status: true,
                     type: "competitor",
                     actualStatus: competitorData.status || "pending",
-                    isPaid: competitorData.isPaid || competitorData.isPayed || false
+                    isPaid: competitorData.isPaid || competitorData.isPayed || false,
+                    major: competitorData.major || ""
                 }, { status: 200 });
             }
         }
