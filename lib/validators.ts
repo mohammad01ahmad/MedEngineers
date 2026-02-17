@@ -57,10 +57,6 @@ export function validateBaseForm(data: any) {
     if (data.emiratesID.length > 18) {
       errors.push("Emirates ID must be less than 18 characters");
     }
-    // EID check format (000-0000-0000000-0)
-    if (!/^[0-9]{3}-[0-9]{4}-[0-9]{7}-[0-9]$/.test(data.emiratesID)) {
-      errors.push("Invalid Emirates ID format");
-    }
   }
 
   return {

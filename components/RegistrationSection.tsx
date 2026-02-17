@@ -152,7 +152,7 @@ export function RegistrationSection() {
     }
   };
 
-  // Auth Listener
+  // Auth Listener (runs once when component mounts)
   useEffect(() => {
     const checkLocalCache = () => {
       if (typeof window !== 'undefined') {
@@ -167,6 +167,18 @@ export function RegistrationSection() {
     checkLocalCache();
 
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      if (!user) {
+        setStatus("guest");
+        setCurrentUser(null);
+        return;
+      }
+
+      if (hasValidStoredData()) {
+        console.log("Pending form data detected - skipping status check, letting form submit first");
+        setCurrentUser(user);
+        return;
+      }
+
       checkUserStatus(user);
     });
     return () => unsubscribe();
@@ -862,7 +874,14 @@ export function RegistrationSection() {
               {/* Custom Styled Form with built-in submit */}
               <CustomApplicationForm onSubmitSuccess={() => {
                 console.log("Form submitted successfully, triggering status check...");
-                checkUserStatus(auth.currentUser || currentUser);
+
+                // Set pending status immediately
+                setStatus("loading");
+
+                // Then check status after Firebase write completes
+                setTimeout(() => {
+                  checkUserStatus(auth.currentUser || currentUser);
+                }, 2000); // 2 second delay for Firebase write
               }} />
             </div>
           </div>
