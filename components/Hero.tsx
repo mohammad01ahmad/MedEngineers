@@ -1,47 +1,28 @@
-import { signOut } from "firebase/auth";
-import { auth } from "@/lib/Firebase";
+"use client";
+
+import { useAuth } from "@/lib/AuthContext";
 
 export function Hero() {
-  // const { signOut } = useAuth(); // Removed useAuth
+  const { signOut } = useAuth();
 
   const handleSignOut = async () => {
     console.log("=== USER SIGN OUT ===");
 
     try {
-      console.log("Signing out from Firebase...");
-      await signOut(auth);
-      console.log("Firebase sign out completed");
+      console.log("Signing out through AuthContext...");
+      await signOut();
 
-      // Wait longer to ensure Firebase state is fully cleared
-      await new Promise(resolve => setTimeout(resolve, 1000));
-
-      // Verify user is actually signed out before reload
-      const currentUser = auth.currentUser;
-      console.log("Current user after sign out:", currentUser);
-
-      if (currentUser) {
-        console.log("User still exists, forcing sign out...");
-        await auth.signOut();
-        await new Promise(resolve => setTimeout(resolve, 500));
-      }
-
-      console.log("Reloading page...");
-      // Force page reload to clear all state
+      console.log("Reloading page to clear all local state...");
+      // Force page reload to clear all state after context updates
       window.location.href = window.location.origin;
 
     } catch (error) {
       console.error("Sign out error:", error);
-      // Still try to sign out from Firebase directly
-      try {
-        await auth.signOut();
-        await new Promise(resolve => setTimeout(resolve, 500));
-      } catch (e) {
-        console.error("Direct Firebase sign out failed:", e);
-      }
-      // Force reload even if sign-out fails
+      // Force reload even if sign-out fails to ensure clean state
       window.location.href = window.location.origin;
     }
   };
+
   return (
     <section className="relative min-h-screen flex items-center justify-center overflow-hidden bg-black">
       {/* Background Image with Dark Overlay */}

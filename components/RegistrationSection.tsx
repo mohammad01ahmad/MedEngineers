@@ -2,12 +2,11 @@
 
 import { useState, useEffect, useRef } from "react";
 import { CustomApplicationForm } from "./CustomApplicationForm";
-import { onAuthStateChanged, signOut, signInWithPopup, signInWithRedirect, GoogleAuthProvider } from "firebase/auth";
 import { TicketTailorWidget } from "@/components/TicketTailorWidget";
 import { auth } from "@/lib/Firebase";
 import { Button } from "@/components/ui/button";
 import { retrieveFormData, hasValidStoredData, clearStoredData } from "@/lib/secureStorage";
-import { isSafari } from "@/lib/browserDetection";
+import { useAuth } from "@/lib/AuthContext";
 
 type UserStatus = "guest" | "pending" | "approved" | "rejected" | "loading" | "domain_ai" | "payment_success" | "final_phase" | "domain_selection";
 
@@ -35,8 +34,7 @@ interface SubmissionResult {
 }
 
 export function RegistrationSection() {
-  // Mock state to demonstrate the flow. In a real app, this comes from the backend.
-
+  const { user, signInWithGoogle, signOut } = useAuth();
   // Initialize with a dedicated 'loading' status to prevent Guest UI flicker
   const [status, setStatus] = useState<UserStatus>("loading");
   const [currentUser, setCurrentUser] = useState<any>(null);
@@ -156,7 +154,7 @@ export function RegistrationSection() {
     }
   };
 
-  // Auth Listener (runs once when component mounts)
+  // Auth Listener (synchronizes with AuthContext)
   useEffect(() => {
     const checkLocalCache = () => {
       if (typeof window !== 'undefined') {
@@ -170,23 +168,20 @@ export function RegistrationSection() {
     };
     checkLocalCache();
 
-    const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      if (!user) {
-        setStatus("guest");
-        setCurrentUser(null);
-        return;
-      }
+    if (!user) {
+      setStatus("guest");
+      setCurrentUser(null);
+      return;
+    }
 
-      if (hasValidStoredData()) {
-        console.log("Pending form data detected - skipping status check, letting form submit first");
-        setCurrentUser(user);
-        return;
-      }
+    if (hasValidStoredData()) {
+      console.log("Pending form data detected - skipping status check, letting form submit first");
+      setCurrentUser(user);
+      return;
+    }
 
-      checkUserStatus(user);
-    });
-    return () => unsubscribe();
-  }, [hasCheckedStatus, paymentSuccessDismissed]);
+    checkUserStatus(user);
+  }, [user]); // Only depend on current user from AuthContext
 
   // Handle manual status check
   const handleCheckStatus = async () => {
@@ -195,15 +190,8 @@ export function RegistrationSection() {
     setHasCheckedStatus(true);
 
     try {
-      const provider = new GoogleAuthProvider();
-      if (isSafari()) {
-        console.log("Using redirect for Safari");
-        await signInWithRedirect(auth, provider);
-      } else {
-        console.log("Using popup for non-Safari");
-        await signInWithPopup(auth, provider);
-      }
-      // The onAuthStateChanged hook will handle the rest
+      await signInWithGoogle();
+      // The useEffect on `user` will handle the rest once signed in
     } catch (error: any) {
       console.error("Status check login failed", error);
       setStatusCheckMessage(error.message || "Failed to sign in");
@@ -318,9 +306,8 @@ export function RegistrationSection() {
       setCurrentUser(null);
       clearStoredData();
 
-
-      // Step B: Tell Firebase to kill the session
-      await signOut(auth);
+      // Step B: Tell AuthContext to sign out
+      await signOut();
     } catch (error) {
       console.error("Logout failed:", error);
     }
