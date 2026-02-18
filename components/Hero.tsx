@@ -24,7 +24,7 @@ export function Hero() {
   };
 
   return (
-    <section className="relative min-h-screen flex items-center justify-center overflow-hidden bg-black">
+    <section className="relative min-h-screen flex items-center justify-center overflow-hidden bg-black [will-change:transform]">
       {/* Background Image with Dark Overlay */}
       <div
         className="absolute inset-0 z-0 bg-cover bg-center"
@@ -76,7 +76,7 @@ export function Hero() {
             <img
               src="/logos/Medengineers Logo-cropped.svg"
               alt="MedEngineers"
-              className="w-auto h-24 xs:h-32 sm:h-40 md:h-52 lg:h-64 xl:h-80 object-contain drop-shadow-[0_0_20px_rgba(0,123,138,0.4)]"
+              className="w-auto h-24 xs:h-32 sm:h-40 md:h-52 lg:h-64 xl:h-80 object-contain drop-shadow-[0_0_15px_rgba(0,123,138,0.3)] [will-change:filter]"
             />
           </div>
 

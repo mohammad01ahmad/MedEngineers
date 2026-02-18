@@ -409,7 +409,7 @@ export function RegistrationSection() {
   };
 
   return (
-    <section id="registration" className="py-24 bg-white dark:bg-zinc-950">
+    <section id="registration" className="py-24 bg-white dark:bg-zinc-950 [will-change:transform]">
       <div className="mx-auto max-w-7xl px-6 lg:px-8">
 
         {/* Global User Header & Logout */}
