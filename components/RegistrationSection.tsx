@@ -99,18 +99,13 @@ export function RegistrationSection() {
           }
         } else {
           // Not paid yet
-          if (isEngineer) {
-            // Engineers skip pending and go straight to payment widget (approved status)
+          // Engineering and Healthcare now both follow the same flow: Pending -> Approved -> Widget
+          if (actualStatus === "accepted") {
             setStatus("approved");
+          } else if (actualStatus === "rejected") {
+            setStatus("rejected");
           } else {
-            // Healthcare (Medicine) follows the normal flow: Pending -> Approved -> Widget
-            if (actualStatus === "accepted") {
-              setStatus("approved");
-            } else if (actualStatus === "rejected") {
-              setStatus("rejected");
-            } else {
-              setStatus("pending");
-            }
+            setStatus("pending");
           }
         }
 
@@ -232,8 +227,8 @@ export function RegistrationSection() {
               return;
             }
 
-            // For Healthcare: handle transition from pending to approved/rejected
-            if (!isEngineer && status === "pending") {
+            // Handle transition from pending to approved/rejected for all tracks
+            if (status === "pending") {
               if (actualStatus === "accepted") {
                 setStatus("approved");
                 setCurrentUser((prev: any) => prev ? { ...prev, actualStatus: "accepted" } : null);
