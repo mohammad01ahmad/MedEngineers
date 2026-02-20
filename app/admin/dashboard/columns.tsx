@@ -8,6 +8,7 @@ export type Competitor = {
     id: string
     fullName: string
     email: string
+    major: string
     status: string
 }
 
@@ -31,6 +32,10 @@ export const columns: ColumnDef<Competitor>[] = [
     {
         accessorKey: "email",
         header: "Email",
+    },
+    {
+        accessorKey: "major",
+        header: "Major",
     },
     {
         accessorKey: "status",
