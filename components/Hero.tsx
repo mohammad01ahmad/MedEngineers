@@ -72,12 +72,12 @@ export function Hero() {
 
 
         {/* Main Headline */}
-        <h1 className="flex flex-col items-center px-4 w-full">
-          <div className="w-full flex justify-center items-center px-4">
+        <h1 className="flex flex-col items-center w-full">
+          <div className="w-full flex justify-center items-center">
             <img
               src="/logos/Medengineers Logo-cropped.svg"
               alt="MedEngineers"
-              className="w-auto h-24 xs:h-32 sm:h-40 md:h-52 lg:h-64 xl:h-80 object-contain drop-shadow-[0_0_15px_rgba(0,123,138,0.3)] [will-change:filter]"
+              className="w-255 h-24 xs:h-32 sm:h-40 md:h-52 lg:h-64 xl:h-82 object-contain drop-shadow-[0_0_15px_rgba(0,123,138,0.3)] [will-change:filter]"
             />
           </div>
 
