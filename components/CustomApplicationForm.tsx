@@ -104,9 +104,9 @@ export function CustomApplicationForm({ onSubmitSuccess }: CustomApplicationForm
     // Questions before the major question (e.g., 1-6) are always shown
     // NOTE: These indices assume SECTIONS HAVE BEEN REMOVED from Google Forms
     const SKIP_LOGIC: Record<string, { start: number; end: number | null }> = {
-        "Engineering": { start: 7, end: 19 },   // Items 7-18 (Engineering-only questions)
-        "Medicine": { start: 19, end: null },   // Items 19+ (Medicine-only questions) - Maintain legacy support
-        "Healthcare": { start: 19, end: null }, // Items 19+ (Healthcare questions)
+        "Engineering": { start: 8, end: 20 },   // Items 8-19 (Engineering-only questions)
+        "Medicine": { start: 20, end: null },   // Items 20+ (Medicine-only questions) - Maintain legacy support
+        "Healthcare": { start: 20, end: null }, // Items 20+ (Healthcare questions)
     };
 
     // No common ending - both tracks have their own final questions

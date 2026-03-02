@@ -195,29 +195,31 @@ export function validateCompetitorForm(data: any) {
       "The Coder: I am happiest when I am training a model, debugging a script, or designing a UI.",
     ];
 
-    if (!data.workStyle && data.workStyle.length !== '') {
+    if (data.workStyle && data.workStyle !== '') {
       if (data.major === "Engineering") {
-        if (!data.workStyle.includes(workStyleOptions)) {
-          errors.push("Work style is required");
+        if (!workStyleOptions.includes(data.workStyle)) {
+          errors.push("Invalid work style selection");
         }
       }
     }
 
     // Text field validations, changed max characters from 2000 to 100 as mentioned in form
-    if (!data.projects && data.projects.length > 100) {
+    if (data.projects && typeof data.projects === 'string' && data.projects.length > 100) {
       errors.push("Projects description must be less than 100 characters");
     }
 
-    if (!data.experience && data.experience.length > 1000) {
+    if (data.experience && typeof data.experience === 'string' && data.experience.length > 1000) {
       errors.push("Experience description must be less than 1000 characters");
     }
 
-    if (!data.challengeAnswer) {
+    if (data.challengeAnswer && typeof data.challengeAnswer === 'string') {
       if (data.challengeAnswer.length < 10) {
         errors.push("Challenge answer must be at least 10 characters");
       } else if (data.challengeAnswer.length > 1000) {
         errors.push("Challenge answer must be less than 1000 characters");
       }
+    } else if (!data.challengeAnswer) {
+      errors.push("Challenge answer is required");
     }
   } else if (data.major === "Medicine" || data.major === "Healthcare") {
 
@@ -243,7 +245,7 @@ export function validateCompetitorForm(data: any) {
       `System Mapping: I understand how hospital departments and workflows actually interact.`
     ]
 
-    if (!data.skillSet && data.skillSet.length !== '') {
+    if (data.skillSet && data.skillSet !== '') {
       // Apply to both Medicine and Healthcare
       if (data.major === "Medicine" || data.major === "Healthcare") {
         if (!skillSet.includes(data.skillSet)) {
