@@ -1246,8 +1246,14 @@ export function RegistrationSection() {
                               />
                             </div>
                             <button
-                              onClick={() => {
-                                if (discountInput.trim().toLowerCase() === "career club gmu") {
+                              onClick={async () => {
+                                const inputClean = discountInput.trim().toLowerCase();
+                                const msgBuffer = new TextEncoder().encode(inputClean);
+                                const hashBuffer = await crypto.subtle.digest("SHA-256", msgBuffer);
+                                const hashArray = Array.from(new Uint8Array(hashBuffer));
+                                const hashHex = hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
+
+                                if (hashHex === "09c7252dd53624cc1bcb172d801f375ece57ea12e4a5bda1ace6b525c91e5c61") {
                                   setIsDiscountApplied(true);
                                 } else {
                                   setIsDiscountApplied(false);
