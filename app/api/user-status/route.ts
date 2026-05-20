@@ -132,12 +132,7 @@ export async function POST(req: NextRequest) {
         }
 
         // Authorization: User can only read their own status, unless they're an admin
-        const adminEmails = [
-            "khaled.a.m2006@gmail.com",
-            "mohammad01ahmad@gmail.com",
-            "medhackglobal@gmail.com"
-        ];
-        const isAdmin = decodedToken.admin === true || (decodedToken.email && adminEmails.includes(decodedToken.email));
+        const isAdmin = decodedToken.admin === true;
         const isOwnStatus = decodedToken.uid === uid;
 
         if (!isOwnStatus && !isAdmin) {
