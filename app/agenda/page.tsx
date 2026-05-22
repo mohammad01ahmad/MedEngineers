@@ -942,6 +942,14 @@ function AgendaPageInner() {
                       <p className="text-[#007b8a] text-xs md:text-[13px] mt-3 font-medium">
                         Only one person from the team should upload, and the product can only be submitted once.
                       </p>
+                      <div className="flex items-center gap-2">
+                        <p className="text-xs md:text-[13px] mt-3 font-medium">
+                          If you are unaware of how to create a Google drive Link, here is a tutorial:
+                        </p>
+                        <a href="https://drive.google.com/file/d/1Vx2NzGR5Bgq9JPD84wHnNxcpytJ-NwtA/view?usp=sharing" target="_blank" rel="noopener noreferrer" className="text-[#007b8a] text-xs md:text-[13px] mt-3 font-medium underline animate-pulse">
+                          Link
+                        </a>
+                      </div>
                     </div>
 
                     <div className="relative z-10 shrink-0 w-full md:w-auto">

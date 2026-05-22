@@ -16,8 +16,8 @@ export async function POST(request: NextRequest) {
         if (!teamId || !teamName) {
             return NextResponse.json({ error: "teamId and teamName are required" }, { status: 400 });
         }
-        if (memberEmails.length !== 3) {
-            return NextResponse.json({ error: "Each team must have exactly 3 members" }, { status: 400 });
+        if (memberEmails.length === 0 || memberEmails.length > 4) {
+            return NextResponse.json({ error: "Each team must have between 1 and 4 members" }, { status: 400 });
         }
 
         const uniqueEmails = new Set(memberEmails.map((email) => email.trim().toLowerCase()).filter(Boolean));
@@ -63,7 +63,7 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ success: true, team: { id: savedTeam.id, ...savedTeam.data() } }, { status: 200 });
     } catch (error: any) {
         if (error.message === "INVALID_TEAM_SIZE") {
-            return NextResponse.json({ error: "Each team must have exactly 3 members" }, { status: 400 });
+            return NextResponse.json({ error: "Each team must have between 1 and 4 members" }, { status: 400 });
         }
         if (error.message === "UNAUTHORIZED") {
             return NextResponse.json({ error: "Authentication required" }, { status: 401 });
