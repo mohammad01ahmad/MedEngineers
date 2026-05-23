@@ -10,13 +10,13 @@ import { AlertModal } from "@/components/AlertModal";
 ═══════════════════════════════════════════ */
 export default function TeamModal({ isOpen, onClose, onSave, initialTeam, allTeams
 }: { isOpen: boolean; onClose: () => void; onSave: (payload: { teamId?: string; teamName: string; memberEmails: string[] }) => void | Promise<void>; initialTeam?: Team | null; allTeams: Team[]; }) {
-    const EMPTY_TEAM_MEMBERS = ["", "", "", ""];
+    const EMPTY_TEAM_MEMBERS = ["", "", "", "", ""];
 
     // --- TEAM FORM LOGIC ---
     const [teamName, setTeamName] = useState(initialTeam ? initialTeam.name : "");
     const [members, setMembers] = useState<string[]>(
         initialTeam && initialTeam.members.length > 0
-            ? [...initialTeam.members.map((member) => member.email), ...Array(Math.max(0, 4 - initialTeam.members.length)).fill("")]
+            ? [...initialTeam.members.map((member) => member.email), ...Array(Math.max(0, 5 - initialTeam.members.length)).fill("")]
             : EMPTY_TEAM_MEMBERS
     );
     const [alertConfig, setAlertConfig] = useState<{ title: string, message: string } | null>(null);
@@ -26,7 +26,7 @@ export default function TeamModal({ isOpen, onClose, onSave, initialTeam, allTea
             setTeamName(initialTeam ? initialTeam.name : "");
             setMembers(
                 initialTeam && initialTeam.members.length > 0
-                    ? [...initialTeam.members.map((member) => member.email), ...Array(Math.max(0, 4 - initialTeam.members.length)).fill("")]
+                    ? [...initialTeam.members.map((member) => member.email), ...Array(Math.max(0, 5 - initialTeam.members.length)).fill("")]
                     : EMPTY_TEAM_MEMBERS
             );
         }
@@ -45,8 +45,8 @@ export default function TeamModal({ isOpen, onClose, onSave, initialTeam, allTea
         if (!teamName.trim()) return setAlertConfig({ title: "Team Name Required", message: "Please enter a name for your team before saving." });
 
         const validMembers = members.map((email) => email.trim()).filter(Boolean);
-        if (validMembers.length === 0 || validMembers.length > 4) {
-            return setAlertConfig({ title: "Invalid Member Count", message: "Each team must have between 1 and 4 members." });
+        if (validMembers.length === 0 || validMembers.length > 5) {
+            return setAlertConfig({ title: "Invalid Member Count", message: "Each team must have between 1 and 5 members." });
         }
 
         // Email format validation
@@ -144,7 +144,7 @@ export default function TeamModal({ isOpen, onClose, onSave, initialTeam, allTea
                         </div>
                     ))}
 
-                    <p className="text-xs text-gray-500 mb-6">Each team must include between 1 and 4 competitor emails.</p>
+                    <p className="text-xs text-gray-500 mb-6">Each team must include between 1 and 5 competitor emails.</p>
 
                     {/* Actions */}
                     <div className="flex gap-3 justify-end pt-5 border-t border-white/10">

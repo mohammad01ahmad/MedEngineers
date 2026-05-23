@@ -30,7 +30,7 @@ export async function verifyAdminBearer(request: NextRequest, options?: { allowM
 
 export async function resolveTeamMembers(memberEmails: string[]) {
     const normalizedEmails = memberEmails.map((email) => email.trim().toLowerCase()).filter(Boolean);
-    if (normalizedEmails.length === 0 || normalizedEmails.length > 4) {
+    if (normalizedEmails.length === 0 || normalizedEmails.length > 5) {
         throw new Error("INVALID_TEAM_SIZE");
     }
 
